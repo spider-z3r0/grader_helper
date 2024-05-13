@@ -1,6 +1,8 @@
 import pandas as pd
 import pathlib as pl
 import re
+from .ask_to_rename import ask_to_rename
+from .is_already_renamed import is_already_renamed
 
 def rename_folders(df, subs_folder):
     """
@@ -12,16 +14,6 @@ def rename_folders(df, subs_folder):
     """
     # Convert DataFrame to a dictionary for easier lookup
     name_id_map = {(row['Last Name'].upper(), row['First Name'].upper()): row['Student ID'] for _, row in df.iterrows()}
-    
-    def ask_to_rename(folder_name, suggested_name):
-        """Prompts user for rename confirmation."""
-        response = input(f"Rename '{folder_name}' to '{suggested_name}'? (y/n): ").strip().lower()
-        return response == 'y'
-
-    def is_already_renamed(folder_name):
-        """Check if the folder name is already in the expected format."""
-        pattern = r"^[A-Z]+, [A-Z]+ \(\d+\)$"
-        return re.match(pattern, folder_name) is not None
 
     rename_attempts = []  # Initialize a list to keep track of rename attempts
 
