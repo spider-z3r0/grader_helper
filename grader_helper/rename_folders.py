@@ -1,6 +1,6 @@
 import pandas as pd
 import pathlib as pl
-
+import re
 
 def rename_folders(df, subs_folder):
     """
@@ -8,7 +8,7 @@ def rename_folders(df, subs_folder):
     
     Args:
         df (pd.DataFrame): DataFrame containing columns 'Last Name', 'First Name', and 'Student ID'.
-        subs_folder (Path): pathlib.Path object pointing to the directory containing the folders to be renamed.
+        subs_folder (pl.Path): pathlib.Path object pointing to the directory containing the folders to be renamed.
     """
     # Convert DataFrame to a dictionary for easier lookup
     name_id_map = {(row['Last Name'].upper(), row['First Name'].upper()): row['Student ID'] for _, row in df.iterrows()}
@@ -18,10 +18,15 @@ def rename_folders(df, subs_folder):
         response = input(f"Rename '{folder_name}' to '{suggested_name}'? (y/n): ").strip().lower()
         return response == 'y'
 
+    def is_already_renamed(folder_name):
+        """Check if the folder name is already in the expected format."""
+        pattern = r"^[A-Z]+, [A-Z]+ \(\d+\)$"
+        return re.match(pattern, folder_name) is not None
+
     rename_attempts = []  # Initialize a list to keep track of rename attempts
 
     for folder in subs_folder.iterdir():
-        if folder.is_dir():
+        if folder.is_dir() and not is_already_renamed(folder.name.upper()):
             folder_name_upper = folder.name.upper()
             matched = False
             
@@ -76,8 +81,7 @@ def rename_folders(df, subs_folder):
     # Log rename attempts
     rename_log_df = pd.DataFrame(rename_attempts)
     log_path = subs_folder / "folder_rename_log.csv"
-    if log_path.exists():
-        renames = pd.read_csv(log_path)
-        rename_log_df = pd.concat([renames, rename_log_df], ignore_index=True)
-    rename_log_df.to_csv(log_path, index=False)
+    
+    # Append to log file if it exists or create a new one
+    rename_log_df.to_csv(log_path, mode='a', header=not log_path.exists(), index=False)
     print("Folder rename operations logged to folder_rename_log.csv.")
