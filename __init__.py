@@ -32,7 +32,8 @@ from .grader_helper.file_operations.save_distributed_graders import (
     save_distributed_graders,
 )
 from .grader_helper.file_operations.save_grader_sheets import save_grader_sheets
-
+from .grader_helper.file_operations.extract_studentid_grade import extract_studentid_grade
+from .grader_helper.file_operations.catch_grades import catch_grades
 
 __all__ = [
     "distribute_feedback_sheets",
@@ -44,4 +45,6 @@ __all__ = [
     "save_distributed_graders",
     "save_grader_sheets",
     "make_letter_grade",
+    "extract_studentid_grade",
+    "catch_grades",
 ]

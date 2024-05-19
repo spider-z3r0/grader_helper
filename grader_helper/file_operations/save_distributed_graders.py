@@ -3,7 +3,7 @@
 
 import pandas as pd
 import pathlib as pl
-from assignment.assign_graders_individual import assign_graders_individual
+from ..assignment.assign_graders_individual import assign_graders_individual
 
 
 def main():

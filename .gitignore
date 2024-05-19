@@ -185,3 +185,20 @@ git-filter-repo
 # poetry files
 dist
 /dist
+dist/grader_helper-0.1.9-py3-none-any.whl
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyz
+*.pyw
+*.pyi
+*.pycachefile
+*.egg-info/
+dist/
+build/
+
+scratch.*
+
