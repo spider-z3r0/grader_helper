@@ -1,7 +1,20 @@
-from dependencies import xw, pythoncom, pd, pl
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+from ..dependencies import xw, pythoncom, pd, pl
 import logging
 
-def extract_studentid_grade(file_path, cell):
+def main():
+    # paths
+    file1 = pl.Path(r'..\data\feedback_sheets\Feedback sheet 20274785.xlsx')
+    file2 = pl.Path(r'..\data\feedback_sheets\Feedback sheet 21260893.xlsx')
+    if file1.exists():
+        print(f"File {file1} exists.")
+    if file2.exists():
+        print(f"File {file2} exists.")
+    # id_1, mark_1 = extract_studentid_grade()
+
+def extract_studentid_grade(file_path:pl.Path, cell:str):
     """
     This function extracts the student ID and grade from a feedback file.
 
@@ -49,5 +62,8 @@ def extract_studentid_grade(file_path, cell):
         # Uninitialize COM environment
         pythoncom.CoUninitialize()
 
+
+if __name__ == "__main__":
+    main()
 
 

@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 from ..dependencies import pd, os, tqdm, ThreadPoolExecutor, pl
 from .process_grade_file import process_file
 

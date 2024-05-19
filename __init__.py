@@ -4,6 +4,9 @@
 """ This is the top-level init file. Honestly, I'm not 100% sure if I need it, but it's here."""
 
 
+# dependencies
+from .grader_helper import dependencies
+
 # ingesting
 from .grader_helper.ingesting.load_graders import load_graders
 from .grader_helper.ingesting.import_brightspace_classlist import (

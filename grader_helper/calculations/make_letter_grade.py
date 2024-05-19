@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 def make_letter_grade(score: int|float, fail_threshold: int|float=35) -> str:
     """
     Convert a numerical score to a letter grade.

@@ -1,6 +1,8 @@
-import pandas as pd
-import numpy as np
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
+
+from ..dependencies import pd, np
 
 def main():
     # Example usage

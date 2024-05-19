@@ -4,6 +4,7 @@
 
 """ This is the init file the folder that contains all the sub-modules. But it's not the top-level init file."""
 
+from .dependencies import log, pd, xw, pl, copy2, copytree, re, tqdm, ThreadPoolExecutor , pythoncom, os
 
 # ingesting
 from ingesting.load_graders import load_graders
