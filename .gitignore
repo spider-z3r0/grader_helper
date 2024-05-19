@@ -178,3 +178,6 @@ scratch.*
 # data
 data/
 /*.csv
+
+# git commands
+git-filter-repo
