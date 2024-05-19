@@ -1,18 +1,34 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# import all the functions from the modules
+""" This is the top-level init file. Honestly, I'm not 100% sure if I need it, but it's here."""
 
-from .grader_helper.distribute_feedback_sheets import distribute_feedback_sheets
-from .grader_helper.distribute_graders_individual import distribute_graders_individual
-from .grader_helper.distribute_graders_groups import distribute_graders_groups
-from .grader_helper.import_brightspace_classlist import import_brightspace_classlist
-from .grader_helper.load_graders import load_graders
-from .grader_helper.rename_folders import rename_folders
-from .grader_helper.save_distributed_graders import save_distributed_graders
-from .grader_helper.save_grader_sheets import save_grader_sheets
-from .grader_helper.ask_to_rename import ask_to_rename
-from .grader_helper.is_already_renamed import is_already_renamed
+
+# ingesting
+from .grader_helper.ingesting.load_graders import load_graders
+from .grader_helper.ingesting.import_brightspace_classlist import (
+    import_brightspace_classlist,
+)
+
+
+# calculations
+from .grader_helper.calculations.make_letter_grade import make_letter_grade
+
+# grader assignment
+from .grader_helper.assignment.assign_graders_individual import (
+    assign_graders_individual,
+)
+from .grader_helper.assignment.assign_graders_groups import assign_graders_groups
+
+# file saving
+from .grader_helper.file_operations.distribute_feedback_sheets import (
+    distribute_feedback_sheets,
+)
+from .grader_helper.file_operations.rename_folders import rename_folders
+from .grader_helper.file_operations.save_distributed_graders import (
+    save_distributed_graders,
+)
+from .grader_helper.file_operations.save_grader_sheets import save_grader_sheets
 
 
 __all__ = [
@@ -24,6 +40,5 @@ __all__ = [
     "rename_folders",
     "save_distributed_graders",
     "save_grader_sheets",
-    "ask_to_rename",
-    "is_already_renamed",
+    "make_letter_grade",
 ]

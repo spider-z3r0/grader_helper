@@ -13,7 +13,12 @@ pandas = "^2.2.2"
 pathlib = "^1.0.1"
 openpyxl = "^3.1.2"
 ipykernel = "^6.29.4"
+xlwings = "^0.31.1"
+tqdm = "^4.66.4"
 
+
+[tool.poetry.group.dev.dependencies]
+sphinx = "^7.3.7"
 
 [build-system]
 requires = ["poetry-core"]

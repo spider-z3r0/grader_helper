@@ -1,26 +1,36 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from .load_graders import load_graders
-from .distribute_feedback_sheets import distribute_feedback_sheets
-from .distribute_graders_individual import distribute_graders_individual
-from .distribute_graders_groups import distribute_graders_groups
-from .import_brightspace_classlist import import_brightspace_classlist
-from .rename_folders import rename_folders
-from .save_distributed_graders import save_distributed_graders
-from .save_grader_sheets import save_grader_sheets
-from .ask_to_rename import ask_to_rename
-from .is_already_renamed import is_already_renamed
+
+""" This is the init file the folder that contains all the sub-modules. But it's not the top-level init file."""
+
+
+# ingesting
+from ingesting.load_graders import load_graders
+from ingesting.import_brightspace_classlist import import_brightspace_classlist
+from ingesting.ingest_completed_graderfiles import ingest_completed_graderfiles
+
+# grader assignment
+from assignment.assign_graders_individual import assign_graders_individual
+from assignment.assign_graders_groups import assign_graders_groups
+
+# calculations
+from calculations.make_letter_grade import make_letter_grade
+
+# file operations
+from file_operations.distribute_feedback_sheets import distribute_feedback_sheets
+from file_operations.rename_folders import rename_folders
+from file_operations.save_distributed_graders import save_distributed_graders
+from file_operations.save_grader_sheets import save_grader_sheets
 
 __all__ = [
     "load_graders",
     "distribute_feedback_sheets",
-    "distribute_graders_individual",
-    "distribute_graders_groups",
+    "assign_graders_individual",
+    "assign_graders_groups",
     "import_brightspace_classlist",
     "rename_folders",
     "save_distributed_graders",
     "save_grader_sheets",
-    "ask_to_rename",
-    "is_already_renamed",
+    "ingest_completed_graderfiles",
 ]

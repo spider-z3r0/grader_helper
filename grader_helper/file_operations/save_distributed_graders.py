@@ -1,6 +1,6 @@
 import pandas as pd
 import pathlib as pl
-from .distribute_graders_individual import distribute_graders_individual
+from assignment.assign_graders_individual import assign_graders_individual
 
 
 def main():
@@ -16,7 +16,7 @@ def main():
     graders = ["Grader1", "Grader2", "Grader3"]
 
     # Call the function
-    updated_df = distribute_graders_individual(df, graders, overwrite=False)
+    updated_df = assign_graders_individual(df, graders, overwrite=False)
 
     # Print the updated DataFrame
     print(updated_df)

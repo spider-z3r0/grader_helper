@@ -21,7 +21,7 @@ def main():
     graders = ["Grader1", "Grader2", "Grader3"]
 
     # Call the function
-    updated_df = distribute_graders_groups(
+    updated_df = assign_graders_groups(
         df, graders, assigned_grader_col="AssignedGrader"
     )
 
@@ -29,7 +29,7 @@ def main():
     print(updated_df)
 
 
-def distribute_graders_groups(
+def assign_graders_groups(
     d: pd.DataFrame, l: list, assigned_grader_col: str = "grader"
 ) -> pd.DataFrame:
     """

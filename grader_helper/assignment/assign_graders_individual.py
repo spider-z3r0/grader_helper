@@ -16,15 +16,13 @@ def main():
     graders = ["Grader1", "Grader2", "Grader3"]
 
     # Call the function
-    updated_df = distribute_graders_individual(df, graders, overwrite=False)
+    updated_df = assign_graders_individual(df, graders, overwrite=False)
 
     # Print the updated DataFrame
     print(updated_df)
 
 
-def distribute_graders_individual(
-    d: pd.DataFrame, l: List, overwrite=False, save=False
-):
+def assign_graders_individual(d: pd.DataFrame, l: List, overwrite=False, save=False):
     """
     This assigns graders to each student in the dataframe.
     If the 'grader' column already exists and overwrite is False, the distribution is not changed.

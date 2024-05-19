@@ -5,7 +5,7 @@ from shutil import copy2
 
 def distribute_feedback_sheets(subs_folder: pl.Path, rubric_name: pl.Path) -> None:
     """
-    Copies a copy of the rubric to the feedback folder of each student who submitted an assignment.
+    Copies a copy of the rubric to the feedback folder of each student who submitted an distributement.
 
     Parameters
     ----------
