@@ -4,6 +4,7 @@
 
 from ..dependencies import pd, np
 
+
 def main():
     # Example usage
     # Create a MultiIndex DataFrame with group information

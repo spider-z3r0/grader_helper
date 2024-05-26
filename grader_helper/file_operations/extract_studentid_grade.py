@@ -5,7 +5,7 @@ from ..dependencies import xw, pythoncom, pd, pl
 import logging
 
 
-def extract_studentid_grade(file_path:pl.Path, cell:str):
+def extract_studentid_grade(file_path: pl.Path, cell: str):
     """
     This function extracts the student ID and grade from a feedback file.
 
@@ -30,7 +30,7 @@ def extract_studentid_grade(file_path:pl.Path, cell:str):
             # Access the first worksheet
             sheet = workbook.sheets[0]
             # Extract student ID from filename
-            student_id = pl.Path(file_path).stem.split(' ')[-1]  
+            student_id = pl.Path(file_path).stem.split(" ")[-1]
             # Extract grade from the specified cell
             grade = sheet[cell].value
             # Close the workbook
@@ -52,6 +52,3 @@ def extract_studentid_grade(file_path:pl.Path, cell:str):
     finally:
         # Uninitialize COM environment
         pythoncom.CoUninitialize()
-
-
-
