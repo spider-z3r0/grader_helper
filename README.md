@@ -8,7 +8,7 @@ It's designed to help with managing both specific coursework
    - renaming student submission folders into UL format (e.g. "Lastname, Firstname (Studentnumber)") and the Brightspace format ("1234-5678 - Lastname Firstname - 01 January 2001 0000 AM") and back again (for reupload to Brightspace).
  - randomly assigning submissions to graders (both group and individual assesments).
  - disrtibuting blank feedback sheets into each students submission folder (named using each students student number)
- - 
+  
 ## Key Features
 
 - **Automated Grader Assignment**: Assigns graders to students either individually or in groups.
