@@ -2,6 +2,7 @@
 name = "grader-helper"
 version = "0.1.11"
 description = "Functions to help manage assignments from UL which are hosted on Brightspace"
+description-content-type = "text/markdown"
 authors = [{name = "Kevin O Malley", email = "kevomalley743@gmail.com"}]
 license = "MIT"
 readme = "README.md"
