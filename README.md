@@ -23,7 +23,7 @@ It's designed to help with managing both specific coursework
 ### From PyPI
 
 Install the package directly:
-```bash
+```
 pip install grader-helper
 ```
 
@@ -31,7 +31,7 @@ pip install grader-helper
 
 [UV](https://docs.astral.sh/) is an incredibly fast python tool for dependency management in python. See the docs for guides on setting up a project with UV.  
 
-```bash
+```
 uv add grader_helper
 ```
 
