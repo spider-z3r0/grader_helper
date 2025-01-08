@@ -27,70 +27,19 @@ Install the package directly:
 pip install grader-helper
 ```
 
-## Directory Structure
+### Using UV
 
-The project is organized as follows:
+[UV](https://docs.astral.sh/) is an incredibly fast python tool for dependency management in python. See the docs for guides on setting up a project with UV.  
+
+```bash
+uv add grader_helper
 ```
-.
-├── src
-│   ├── assign_graders_groups.py
-│   ├── assign_graders_individual.py
-│   ├── calculate_total_module_score.py
-│   ├── calculate_weighted_score.py
-│   ├── check_for_weighted_columns.py
-│   ├── make_letter_grade.py
-│   ├── prepare_data_for_departmental_template.py
-│   ├── sort_order_columns.py
-│   ├── alphabetise_folders.py
-│   ├── brightspace_name_folders.py
-│   ├── catch_grades.py
-│   ├── distribute_feedback_sheets.py
-│   ├── extract_studentid_grade.py
-│   ├── save_distributed_graders.py
-│   ├── save_grader_sheets.py
-│   ├── import_brightspace_classlist.py
-│   ├── ingest_completed_graderfiles.py
-│   ├── load_graders.py
-│   └── dependencies.py
-├── pyproject.toml
-├── poetry.lock
-├── README.md
-└── .gitignore
-```
+
 
 ## Usage
 
-### Assign Graders
-Assign graders to students:
-```python
-from grader_helper.assign_graders_individual import assign_graders_individual
+Working on more full documentation - watch this space. 
 
-# Example usage
-data = {
-    "student_id": [1, 2, 3],
-    "name": ["Alice", "Bob", "Charlie"]
-}
-graders = ["Grader1", "Grader2"]
-assigned = assign_graders_individual(data, graders)
-```
-
-### Extract Grades
-Extract grades from feedback files:
-```python
-from grader_helper.extract_studentid_grade import extract_studentid_grade
-
-file_path = "path/to/feedback/file.xlsx"
-cell = "B2"
-grade = extract_studentid_grade(file_path, cell)
-```
-
-### Distribute Feedback Sheets
-Distribute rubric feedback sheets to students:
-```python
-from grader_helper.distribute_feedback_sheets import distribute_feedback_sheets
-
-distribute_feedback_sheets("path/to/submissions", "path/to/rubric.xlsx")
-```
 
 ## Dependencies
 
@@ -125,6 +74,6 @@ This project is licensed under the MIT License. See `LICENSE` for more details.
  - Integrate the functionality that allows us to randomly select students from each gradeband and copy them to the moderation folders.
  - Integrate the way of making the departmental gradefile. 
     - I've already got the functions that make the dataframes written, but not any explicit functionality for writing them into the departmental template. 
- - Look at the module and assessment set up functionality from the other modules.
-
+ - Write full documentation and a sample project (make fake student files)
+ - Consider writing it all together into an gui/tui app? 
 

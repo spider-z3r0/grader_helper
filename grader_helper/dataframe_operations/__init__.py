@@ -9,7 +9,9 @@ from .calculate_weighted_score import calculate_weighted_score
 from .calculate_total_module_score import calculate_total_module_score
 from .sort_order_columns import sort_order_columns
 from .check_for_weighted_columns import check_for_weighted_columns
-from .prepare_data_for_departmental_template import prepare_data_for_departmental_template
+from .prepare_data_for_departmental_template import (
+    prepare_data_for_departmental_template,
+)
 
 
 __all__ = [
@@ -17,6 +19,6 @@ __all__ = [
     "calculate_weighted_score",
     "calculate_total_module_score",
     "sort_order_columns",
-    "check_for_weighted_columns", 
-    "prepare_data_for_departmental_template"
+    "check_for_weighted_columns",
+    "prepare_data_for_departmental_template",
 ]

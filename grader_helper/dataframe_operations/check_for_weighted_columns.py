@@ -3,6 +3,7 @@
 
 from collections import Counter
 
+
 def check_for_weighted_columns(col_list: list[str]) -> bool:
     """
     Checks a list of columns to see if the weighted columns are present.
@@ -15,7 +16,13 @@ def check_for_weighted_columns(col_list: list[str]) -> bool:
     Returns:
     tuple: A boolean indicating if all weighted columns are present, and a list of missing weighted columns.
     """
-    coursework_numbers = [int(col.split(" (")[0].split(" ")[-1]) for col in col_list if col.split(" (")[0].split(" ")[-1].isdigit()]
+    coursework_numbers = [
+        int(col.split(" (")[0].split(" ")[-1])
+        for col in col_list
+        if col.split(" (")[0].split(" ")[-1].isdigit()
+    ]
     counts = Counter(coursework_numbers)
-    missing_weighted_columns = [f"Coursework {num}" for num, count in counts.items() if count < 2]
+    missing_weighted_columns = [
+        f"Coursework {num}" for num, count in counts.items() if count < 2
+    ]
     return not missing_weighted_columns, missing_weighted_columns

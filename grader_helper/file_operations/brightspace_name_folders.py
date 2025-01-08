@@ -4,15 +4,16 @@
 
 from ..dependencies import pd, pl
 
+
 def brightspace_name_folders(df: pd.DataFrame, subs_folder: pl.Path):
     rename_attempts = []
     unfound_names = []
 
     # Convert DataFrame columns to uppercase for case-insensitive comparison
-    df['Suggested Name'] = df['Suggested Name'].str.upper()
-    df['Original Name'] = df['Original Name'].str.upper()
+    df["Suggested Name"] = df["Suggested Name"].str.upper()
+    df["Original Name"] = df["Original Name"].str.upper()
 
-    name_map = dict(zip(df['Suggested Name'], df['Original Name']))
+    name_map = dict(zip(df["Suggested Name"], df["Original Name"]))
 
     for folder in subs_folder.iterdir():
         if folder.is_dir():
@@ -30,7 +31,9 @@ def brightspace_name_folders(df: pd.DataFrame, subs_folder: pl.Path):
                         }
                     )
                 except Exception as e:
-                    print(f"Failed to rename folder {folder.name} to {new_folder_name}: {e}")
+                    print(
+                        f"Failed to rename folder {folder.name} to {new_folder_name}: {e}"
+                    )
                     rename_attempts.append(
                         {
                             "Original Name": folder.name,
@@ -38,7 +41,7 @@ def brightspace_name_folders(df: pd.DataFrame, subs_folder: pl.Path):
                             "Outcome": f"Failed: {e}",
                         }
                     )
-            elif folder_name_upper in df['Original Name'].values:
+            elif folder_name_upper in df["Original Name"].values:
                 rename_attempts.append(
                     {
                         "Original Name": folder.name,

@@ -7,12 +7,12 @@ import pathlib as pl
 
 def alphabetise_folders(df, subs_folder):
     """
-    Renames folders in subs_folder based on a DataFrame mapping of names to student IDs. It take the brightspace folder names and renames them 
+    Renames folders in subs_folder based on a DataFrame mapping of names to student IDs. It take the brightspace folder names and renames them
     to the format 'Last Name, First Name (Student ID)' (which is the one used by UL and which a lot of our systems expect). It also creates a log of the rename operations
     and saves it to a csv file called 'folder_rename_log.csv' in the subs_folder directory. This csv file will be updated if the function is run again allowing us to include
-    late submissions. 
+    late submissions.
 
-    You can use the 'folder_rename_log.csv' file to run the `brightspace_name_folders()` function that will rename the folder *back* to the brightspace format so that they can be 
+    You can use the 'folder_rename_log.csv' file to run the `brightspace_name_folders()` function that will rename the folder *back* to the brightspace format so that they can be
     uploaded back to the brightspace assignment folder.
 
     Args:
