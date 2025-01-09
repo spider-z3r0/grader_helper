@@ -24,7 +24,7 @@ jobs:
           pip install hatch twine
 
       - name: Clean previous builds
-        run: rm -rf dist/ build/
+        run: Remove-Item -Recurse -Force dist, build
 
       - name: Build the package
         run: |
@@ -36,4 +36,5 @@ jobs:
           TWINE_PASSWORD: ${{ secrets.GH_PYPI_TOEKN }}
         run: |
           twine upload --verbose dist/*
+
 
