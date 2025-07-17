@@ -168,7 +168,6 @@ ENV/
 
 
 # Tests
-tests/
 scratch.*
 
 # Jupyter Notebook

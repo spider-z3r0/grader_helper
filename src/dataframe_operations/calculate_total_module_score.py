@@ -49,3 +49,7 @@ def calculate_total_module_score(df: pd.DataFrame) -> None | str:
                 "to calculate the total module score). Check your dataframe by running something like `df.head()` or `print(df.columns)`."
             )
     return None
+
+
+
+

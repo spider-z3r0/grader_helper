@@ -76,4 +76,5 @@ This project is licensed under the MIT License. See `LICENSE` for more details.
     - I've already got the functions that make the dataframes written, but not any explicit functionality for writing them into the departmental template. 
  - Write full documentation and a sample project (make fake student files)
  - Consider writing it all together into an gui/tui app? 
+ - Use pydantic models for data validation and consider rewriting as methods on those classes
 
