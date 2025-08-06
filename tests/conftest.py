@@ -87,3 +87,14 @@ def dummy_course(dummy_handbook, dummy_gradefile, dummy_classlist):
         departmental_gradefile=dummy_gradefile,
         completed=False
     )
+
+
+@pytest.fixture
+def minimal_dummy_course():
+    return Course(
+        name="Bare Bones Psychology",
+        code="PS000",
+        root=pl.Path("/path/to/nothing"),
+        model_leader="Kevin O'Malley",
+        year="2025(26)"
+    )

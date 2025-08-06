@@ -1,5 +1,5 @@
 #!usr/bin/env python
-from src.dependencies import pd
+from dependencies import pd
 
 
 def test_coursework_creation(dummy_coursework):

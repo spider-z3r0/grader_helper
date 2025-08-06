@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 
 from .Documents import (
     GradeFile, HandBook, ClassList, FileType, Calendar, )

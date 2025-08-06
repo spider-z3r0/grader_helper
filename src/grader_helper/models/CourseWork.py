@@ -3,7 +3,7 @@
 
 from enum import Enum
 from typing import Self
-from dependencies import (
+from ..dependencies import (
     BaseModel, ConfigDict, pl, datetime, PositiveFloat, pd, np
 )
 from .Documents import ClassList, GradeFile, FileType

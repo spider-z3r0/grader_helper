@@ -1,4 +1,4 @@
-#!usr/bin/env
+#!/usr/bin/env python
 
 
 from src.models.Documents import Calendar, HandBook, GradeFile

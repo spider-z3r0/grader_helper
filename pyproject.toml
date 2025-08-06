@@ -18,6 +18,7 @@ dependencies = [
     "pytest>=8.4.1",
     "python-calamine>=0.4.0",
     "randomtimestamp>=2.3",
+    "ruamel-yaml>=0.18.14",
     "tqdm>=4.67.1",
     "xlwings>=0.33.5",
 ]
