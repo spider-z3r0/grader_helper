@@ -7,23 +7,37 @@ spreadsheets (CSV or Excel) and concatenates them, optionally writing the merged
 result back to disk.
 """
 
+import logging
+
 from ..dependencies import pd, pl
+
+logger = logging.getLogger(__name__)
 
 
 def ingest_completed_graderfiles(
     folder: pl.Path, grader: list[str], type: str = "csv", save: bool = False
 ) -> pd.DataFrame:
-    """
-    This imports the completed grader file for each grader and then concatenates them into a single DataFrame.
+    """Ingest and combine individual grader spreadsheets.
 
     Args:
-    folder (Path): The folder where the grader files are saved.
-    grader (list[str]): The list of graders.
-    type (str): The type of grader file. This can be 'excel' or 'csv'. Default is 'csv'.
-    save (bool): If True, save the concatenated DataFrame to the same foler and type.
+        folder (Path): Directory containing grader files.
+        grader (list[str]): List of grader identifiers.
+        type (str): File type of grader files (``"excel"`` or ``"csv"``).
+        save (bool): When ``True``, write the concatenated DataFrame to disk.
 
     Returns:
-    pd.DataFrame: The concatenated DataFrame.
+        pd.DataFrame: Combined DataFrame with shape ``(n, m)`` where ``n`` is the
+            total number of rows across all successfully ingested grader files and
+            ``m`` is the number of columns in those files.
+
+    Raises:
+        ValueError: If provided arguments are of incorrect type or ``type`` is not
+            ``"excel"`` or ``"csv"``.
+        FileNotFoundError: If a grader file cannot be located.
+        pd.errors.ParserError: If a grader file cannot be parsed. Check that the
+            file is a valid CSV/Excel document with the expected structure.
+        pd.errors.MergeError: If the DataFrames cannot be concatenated, typically
+            due to mismatched columns.
     """
 
     # Check graders is a list of strings
@@ -49,25 +63,31 @@ def ingest_completed_graderfiles(
     # try to create a list of DataFrames
     dfs = []
     for g in grader:
+        file_path = folder / (f"{g}.xlsx" if type == "excel" else f"{g}.csv")
         try:
             if type == "excel":
-                df = pd.read_excel(folder / f"{g}.xlsx")
+                df = pd.read_excel(file_path)
             else:
-                df = pd.read_csv(folder / f"{g}.csv")
+                df = pd.read_csv(file_path)
             dfs.append(df)
-        except FileNotFoundError:
-            print(f"{g}.{type} not found.")
-        # check for pandas errors
-        except pd.errors.ParserError as e:
-            print(
-                f"Error reading {g}.{type}. {e}"
-            )  # I know that this is too general, but I'm not sure what specific errors to expect
+        except FileNotFoundError as e:
+            raise FileNotFoundError(
+                f"Expected file '{file_path}' for grader '{g}' not found. "
+                "Verify the grader name and that the file exists with the correct extension."
+            ) from e
+        except pd.errors.ParserError as e:  # pandas parsing errors
+            raise pd.errors.ParserError(
+                f"Could not parse '{file_path}'. Ensure it is a valid {type.upper()} file "
+                "with the expected structure."
+            ) from e
 
     # try to concatenate the DataFrames
     try:
         df = pd.concat(dfs, ignore_index=True)
     except pd.errors.MergeError as e:
-        print(f"Error concatenating DataFrames. {e}")
+        raise pd.errors.MergeError(
+            f"Error concatenating DataFrames. Ensure files have compatible structures. {e}"
+        ) from e
 
     # save the concatenated DataFrame if save is True
     save_path = folder / f"completed_grades.{type}"
@@ -86,6 +106,6 @@ def ingest_completed_graderfiles(
             else:
                 df.to_csv(folder / "completed_grades.csv", index=False)
         else:
-            print("Operation cancelled.")
+            logger.info("Operation cancelled. Existing file was not overwritten.")
 
     return df
