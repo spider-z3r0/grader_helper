@@ -11,7 +11,7 @@ def main():
 
 def import_item_from_yaml(p: pl.Path) -> Course:
     if not p.exists():
-        raise ValueError("placeholder error")
+        raise ValueError(f"the path {p} doesn't exist")
     try:
         yaml = ym.YAML()
         with open(p, "r") as conf:

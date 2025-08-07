@@ -13,7 +13,7 @@ def main():
     print(f"running {pl.Path(__file__).name}")
 
     test_dict = {
-        "name": "test_module",
+        "name": "test_course",
         "code": "0001",
         "root": pl.Path(__file__).parent.parent.parent.parent / 'tests/output',
         "model_leader": "John Smith",
@@ -38,7 +38,7 @@ def main():
 
 
 def write_item_to_yaml(c: Course | CourseWork, update: bool = False) -> None:
-    path = pl.Path(f"{c.root / c.code}_config.yaml")
+    path = pl.Path(f"{c.root / c.name}_config.yaml")
     if path.exists() and not update:
         raise ValueError(
             f"{path.name} already exists "
