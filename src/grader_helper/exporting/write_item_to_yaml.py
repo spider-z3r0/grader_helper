@@ -38,24 +38,38 @@ def main():
 
 
 def write_item_to_yaml(c: Course | CourseWork, update: bool = False) -> None:
-    path = pl.Path(f"{c.root / c.name}_config.yaml")
+    """Write a :class:`Course` or :class:`CourseWork` instance to a YAML file.
+
+    Parameters
+    ----------
+    c:
+        The course or coursework object to serialise. The resulting file is
+        written to ``c.root`` and named ``<c.name>_config.yaml``.
+    update:
+        If ``True`` an existing configuration file will be overwritten.
+        If ``False`` (default) and the file already exists a :class:`ValueError`
+        is raised.
+
+    Raises
+    ------
+    ValueError
+        If the configuration file already exists and ``update`` is ``False`` or
+        if the object could not be written to disk.
+    """
+    path = pl.Path(f"{c.root / c.name.replace(' ', '_')}_config.yaml")
     if path.exists() and not update:
         raise ValueError(
-            f"{path.name} already exists "
-            "if you wish to overwrite this file please call this function again "
-            "with 'update' set to 'True'."
+            f"{path.name} already exists. Call write_item_to_yaml again with "
+            "update=True to overwrite."
         )
+
     yaml = ym.YAML()
     try:
         yaml.register_class(Course)
-        with open(f"{c.root / c.name.replace(' ', '_')}_config.yaml", 'w') as f:
-            yaml.dump(c.model_dump(mode='json'), f)
+        with open(path, "w") as f:
+            yaml.dump(c.model_dump(mode="json"), f)
     except Exception as e:
-        raise ValueError(
-            "could not write Course configuration to yaml"
-            f"the exception was raised"
-            f"{e}"
-        )
+        raise ValueError(f"Could not write configuration to YAML: {e}") from e
 
 
 if __name__ == "__main__":
