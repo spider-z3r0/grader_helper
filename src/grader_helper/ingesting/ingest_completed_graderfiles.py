@@ -1,5 +1,11 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+"""Combine completed grader files into a single DataFrame.
+
+The :func:`ingest_completed_graderfiles` function reads individual grader
+spreadsheets (CSV or Excel) and concatenates them, optionally writing the merged
+result back to disk.
+"""
 
 from ..dependencies import pd, pl
 

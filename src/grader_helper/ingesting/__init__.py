@@ -1,7 +1,14 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-""" This is the init file for the ingesting module."""
+"""Utilities for importing grading data from various sources.
+
+The ingesting package gathers functions for reading data files such as grader
+lists, Brightspace classlists, completed grader spreadsheets, and YAML
+descriptions of models.  It exports ``load_graders``,
+``import_brightspace_classlist``, ``ingest_completed_graderfiles``, and
+``import_item_from_yaml``.
+"""
 
 from .load_graders import load_graders
 from .import_brightspace_classlist import import_brightspace_classlist

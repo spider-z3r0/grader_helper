@@ -1,5 +1,11 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+"""Import Brightspace classlist CSV files.
+
+Provides :func:`import_brightspace_classlist` for reading a Brightspace export
+and returning a tidy :class:`pandas.DataFrame` containing student identifiers and
+assignment grades.
+"""
 
 import pandas as pd
 import pathlib as pl
