@@ -9,17 +9,37 @@ def main():
 
 
 def guess_model_type(data: dict) -> type[Course] | type[CourseWork]:
+    """Infer which model class is represented by ``data``.
+
+    The function inspects the keys of ``data`` to determine whether the
+    mapping corresponds to the :class:`Course` or :class:`CourseWork` schema.
+
+    Args:
+        data: Dictionary of field names and values describing a model.
+
+    Returns:
+        The :class:`Course` or :class:`CourseWork` class depending on the
+        detected schema.
+
+    Raises:
+        TypeError: If ``data`` is not a dictionary.
+        ValueError: If ``data`` does not match either schema.
+    """
+
     if not isinstance(data, dict):
         raise TypeError(
-            "'data' must be a dictionary mapping of either the Course of CourseWork model.")
+            "'data' must be a dictionary mapping to a Course or CourseWork schema."
+        )
 
-    if 'module_leader' in data.keys():
+    if "module_leader" in data:
         return Course
-    elif 'due_date' in data.keys():
+    if "due_date" in data:
         return CourseWork
-    else:
-        raise ValueError("'data' must be a dictionary mapping of either the Course of CourseWork model. "
-                         "Please check the contents of the dict yout are passing.")
+
+    raise ValueError(
+        "'data' must map to a Course or CourseWork schema. "
+        "Include 'module_leader' for Course data or 'due_date' for CourseWork data."
+    )
 
 
 if __name__ == "__main__":
