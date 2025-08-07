@@ -2,7 +2,7 @@ name: test_course
 code: '0001'
 root: C:\Users\Kevin.OMalley\OneDrive - University of 
   Limerick\Teaching\grader_helper\tests\output
-model_leader: John Smith
+module_leader: John Smith
 year: 2025(26)
 internal_moderator: Joan Smith
 ready: false

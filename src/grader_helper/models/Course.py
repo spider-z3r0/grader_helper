@@ -10,7 +10,7 @@ class Course(BaseModel):
     name: str
     code: str
     root: pl.Path
-    model_leader: str
+    module_leader: str
     year: str  # This will be in the format 20xx(xy)
     internal_moderator: str | None = None
     ready: bool = False

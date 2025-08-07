@@ -1,7 +1,4 @@
-from conftest import resources_dir
 #!/usr/bin/env python
-
-from grader_helper import (write_item_to_yaml, Course, import_item_from_yaml)
 
 
 def test_course_creation(dummy_course):

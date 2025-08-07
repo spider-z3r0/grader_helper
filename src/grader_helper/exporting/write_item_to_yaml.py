@@ -16,7 +16,7 @@ def main():
         "name": "test_course",
         "code": "0001",
         "root": pl.Path(__file__).parent.parent.parent.parent / 'tests/output',
-        "model_leader": "John Smith",
+        "module_leader": "John Smith",
         "year": "2025(26)",  # This will be in the format 20xx(xy)
         "internal_moderator": "Joan Smith",
         "ready": False,
