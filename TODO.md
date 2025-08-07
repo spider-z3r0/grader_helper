@@ -1,29 +1,13 @@
 
 # To do's
 
-A module will have 
+## CourseWork file operations
 
- 1. name
- 2. code
- 3. leader
- 4. handbook
- 5. coursework
- 6. departmental gradefile
- 7. internal moderator
- 8. assesment
-
-
-coursework can be of 2 types
- 1. Assignments
- 2. Exams
-
-
-for each module the set up involves
- 0. prelim:
-  1. set up local folders
-  2. module handbook
-  3. brightspace
-  4. get assignments ready
-  5. fill in mao
-
-
+ [!TODO] save grader files
+ [!TODO] distribute feedback sheets
+ [!TODO] collate grader files
+ [!TODO] create the verification
+ [!TODO] calculate the various derived scores:
+    1. weighted mark
+    2. letter grade
+    3. weighted letter grade

@@ -64,7 +64,7 @@ def dummy_coursework_min():
     return CourseWork(
         name="Test Assignment",
         root=pl.Path("/fake/path/to/coursework"),
-        weight=100.0,
+        weight=50.0,
         type=CourseWorkType.Assignment,
         due_date=datetime.datetime(2025, 12, 15, 17, 0),
         rubric=pl.Path("/fake/path/to/rubric.pdf"),

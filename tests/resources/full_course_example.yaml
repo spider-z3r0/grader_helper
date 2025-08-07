@@ -1,0 +1,39 @@
+name: "Psychology of Decision Making"
+code: "PSY401"
+root: "C:/tmp/psy401"
+module_leader: "Dr. Kevin O'Malley"
+year: "2025(26)"
+internal_moderator: "Dr. Alice Smith"
+ready: true
+completed: false
+
+handbook:
+  path: "C:/tmp/psy401/handbook.pdf"
+  ready: true
+
+classlist:
+  path: "C:/tmp/psy401/classlist.xlsx"
+  type: ".xlsx"
+  ready: true
+
+departmental_gradefile:
+  path: "C:/tmp/psy401/departmental_gradefile.xlsx"
+  type: ".xlsx"
+  ready: true
+  completed: false
+
+coursework:
+  - name: "Assignment 1: Experimental Report"
+    root: "C:/tmp/psy401/coursework/assignment_1"
+    weight: 40.0
+    type: "assignment"
+    due_date: "2025-11-15T17:00:00"
+    rubric: "C:/tmp/psy401/coursework/assignment_1/rubric.pdf"
+    feedback_sheet: "C:/tmp/psy401/coursework/assignment_1/feedback.xlsx"
+    graders:
+      - "alice"
+      - "bob"
+      - "charlie"
+    ready: true
+    completed: false
+    students: null

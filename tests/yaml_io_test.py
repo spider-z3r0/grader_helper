@@ -1,3 +1,4 @@
+import re
 #!/usr/bin/env python
 
 from grader_helper import (write_item_to_yaml, Course,
@@ -42,3 +43,11 @@ def test_create_cwmin_from_yaml(resources_dir):
     test_cw = import_item_from_yaml(path)
     print(test_cw.name)
     assert isinstance(test_cw, CourseWork)
+
+
+def test_create_complex_course_from_yaml(resources_dir):
+    test_course = import_item_from_yaml(
+        resources_dir / "full_course_example.yaml"
+    )
+    assert isinstance(test_course, Course)
+    assert len(test_course.coursework) > 0
