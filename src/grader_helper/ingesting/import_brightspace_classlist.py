@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""Import Brightspace classlist CSV files.
+"""Utilities for reading Brightspace classlist CSV exports.
 
-Provides :func:`import_brightspace_classlist` for reading a Brightspace export
-and returning a tidy :class:`pandas.DataFrame` containing student identifiers and
-assignment grades.
+The module exposes :func:`import_brightspace_classlist`, which converts a
+Brightspace CSV export into a tidy :class:`pandas.DataFrame` of student
+identifiers and assignment grades.
 """
 
 import pandas as pd
@@ -32,27 +32,28 @@ def import_brightspace_classlist(file: pl.Path, assignment_name: str) -> pd.Data
     pandas DataFrame
         The Brightspace classlist.
     """
-    # Check if the file is a CSV file
+    if file.suffix != ".csv":
+        raise ValueError("File must be a CSV file.")
+
     try:
-        if file.suffix != ".csv":
-            raise ValueError("File must be a CSV file.")
-
-        # Read the CSV file and select the needed columns
         classlist_df = pd.read_csv(file)
-        classlist_df = classlist_df[
-            ["Username", "Last Name", "First Name", assignment_name]
-        ]
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(f"Classlist CSV file not found: {file}") from exc
+    except pd.errors.ParserError as exc:
+        raise pd.errors.ParserError(
+            f"Could not parse Brightspace classlist CSV: {file}"
+        ) from exc
 
-        # Clean the 'Username' column by renaming to 'Student ID' and dropping the '#' character
-        classlist_df.rename(columns={"Username": "Student ID"}, inplace=True)
-        classlist_df["Student ID"] = classlist_df["Student ID"].str.replace("#", "")
+    classlist_df = classlist_df[
+        ["Username", "Last Name", "First Name", assignment_name]
+    ]
 
-        # Return the processed classlist DataFrame
-        return classlist_df
+    # Clean the 'Username' column by renaming to 'Student ID' and dropping the '#' character
+    classlist_df.rename(columns={"Username": "Student ID"}, inplace=True)
+    classlist_df["Student ID"] = classlist_df["Student ID"].str.replace("#", "")
 
-    except Exception as e:
-        print(f"Error occurred while importing Brightspace classlist: {e}")
-        return None
+    # Return the processed classlist DataFrame
+    return classlist_df
 
 
 if __name__ == "__main__":
