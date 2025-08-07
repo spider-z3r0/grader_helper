@@ -1,5 +1,5 @@
 #!usr/bin/env python
-from dependencies import pd
+from grader_helper.dependencies import pd
 
 
 def test_coursework_creation(dummy_coursework):

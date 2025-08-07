@@ -7,6 +7,7 @@ It is not intended to be run as a script.
 """
 
 import logging as log
+import ruamel.yaml as ym
 import pandas as pd
 import numpy as np
 import xlwings as xw

@@ -1,16 +1,22 @@
-#!usr/bin/env/python
+#!/usr/bin/env python
 
 import pytest
-from models.Documents import (
-    ClassList, GradeFile, Calendar, HandBook, FileType
+from grader_helper.models import (
+    ClassList, GradeFile, Calendar, HandBook, FileType,
+    CourseWorkType, CourseWork, Course
 )
-from models.CourseWork import (CourseWorkType, CourseWork)
-from models.Course import Course
-
+from grader_helper.dependencies import pl
 import datetime
-import pathlib as pl
 
-resources = pl.Path(__file__).parent/"resources"
+
+@pytest.fixture
+def resources_dir():
+    return pl.Path(__file__).parent / "resources"
+
+
+@pytest.fixture
+def output_dir():
+    return pl.Path(__file__).parent / "output"
 
 
 @pytest.fixture
@@ -27,19 +33,18 @@ def dummy_handbook():
     return HandBook(
         path=pl.Path("/fake/path/to/handbook.pdf"),
         ready=False
-
     )
 
 
 @pytest.fixture
-def example_graders_txt():
-    return resources/"graders.txt"
+def example_graders_txt(resources_dir):
+    return resources_dir / "graders.txt"
 
 
 @pytest.fixture
-def dummy_gradefile():
+def dummy_gradefile(resources_dir):
     return GradeFile(
-        path=resources/"fake_class_list.xlsx",
+        path=resources_dir / "fake_class_list.xlsx",
         ready=True,
         completed=False,
         type=FileType.XL

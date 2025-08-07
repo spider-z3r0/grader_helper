@@ -3,7 +3,7 @@
 
 from enum import Enum
 from typing import Self
-from ..dependencies import (
+from grader_helper.dependencies import (
     BaseModel, ConfigDict, pl, datetime, PositiveFloat, pd, np
 )
 from .Documents import ClassList, GradeFile, FileType
@@ -21,14 +21,14 @@ class CourseWork(BaseModel):
     name: str
     root: pl.Path
     weight: PositiveFloat
-    graders: list[str]
+    graders: list[str] = []
     students: pd.DataFrame | None = None
     type: CourseWorkType
     due_date: datetime.datetime
     rubric: pl.Path
     feedback_sheet: pl.Path
-    ready: bool
-    completed: bool
+    ready: bool = False
+    completed: bool = False
 
     def toggle_ready(self) -> Self:
         self.ready = not self.ready

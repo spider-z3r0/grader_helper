@@ -2,7 +2,7 @@
 
 from enum import Enum
 from typing import Self
-from ..dependencies import BaseModel, PositiveFloat, pl, datetime
+from grader_helper.dependencies import BaseModel, PositiveFloat, pl, datetime
 
 
 class FileType(Enum):

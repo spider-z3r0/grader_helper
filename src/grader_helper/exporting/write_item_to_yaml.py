@@ -4,9 +4,8 @@
 This module handles writing a Module to yaml for easy ingesting and picking up where we left off.
 """
 
-import ruamel.yaml as ym
-import pathlib as pl
-from ..models import Course
+from grader_helper.models import Course, CourseWork
+from grader_helper.dependencies import pl, ym
 import sys
 
 
@@ -16,7 +15,7 @@ def main():
     test_dict = {
         "name": "test_module",
         "code": "0001",
-        "root": pl.Path(__file__).parent.parent.parent / 'tests/resources',
+        "root": pl.Path(__file__).parent.parent.parent.parent / 'tests/output',
         "model_leader": "John Smith",
         "year": "2025(26)",  # This will be in the format 20xx(xy)
         "internal_moderator": "Joan Smith",
@@ -31,14 +30,14 @@ def main():
     test_course = Course(**test_dict)
     print(test_course.model_dump_json(indent=2))
 
-    write_course_yaml(test_course)
+    write_item_to_yaml(test_course)
 
     yaml = ym.YAML()
     yaml.register_class(Course)
     yaml.dump(test_course.model_dump(mode='json'), sys.stdout)
 
 
-def write_course_yaml(c: Course, update: bool = False) -> None:
+def write_item_to_yaml(c: Course | CourseWork, update: bool = False) -> None:
     path = pl.Path(f"{c.root / c.code}_config.yaml")
     if path.exists() and not update:
         raise ValueError(
@@ -49,7 +48,7 @@ def write_course_yaml(c: Course, update: bool = False) -> None:
     yaml = ym.YAML()
     try:
         yaml.register_class(Course)
-        with open(f"{c.root / c.code}_config.yaml", 'w') as f:
+        with open(f"{c.root / c.name.replace(' ', '_')}_config.yaml", 'w') as f:
             yaml.dump(c.model_dump(mode='json'), f)
     except Exception as e:
         raise ValueError(

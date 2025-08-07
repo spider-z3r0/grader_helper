@@ -1,15 +1,8 @@
-#!usr/bin/env
+#!/usr/bin/env python
 
-# TODO: Normalize input fields and guard against unset values
-# - Add a @model_validator(mode="before") to ensure `coursework` is always a list,
-#   even if a single CourseWork object or dict is passed.
-# - Add None checks for optional fields (e.g., classlist, departmental_gradefile, handbook)
-#   before accessing `.ready` or other attributes to prevent AttributeError.
-# - Consider replacing TypeError with ValueError (or a custom ReadinessError) in set_ready().
-
-from .Documents import GradeFile, Calendar, ClassList, HandBook
-from .CourseWork import CourseWork, CourseWorkType
-from ..dependencies import pl, BaseModel, model_validator
+from grader_helper.models.Documents import GradeFile, Calendar, ClassList, HandBook
+from grader_helper.models.CourseWork import CourseWork, CourseWorkType
+from grader_helper.dependencies import pl, BaseModel, model_validator
 from typing import Self
 
 
