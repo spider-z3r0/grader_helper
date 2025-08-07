@@ -1,5 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+"""Load a plain text list of graders.
+
+Exposes :func:`load_graders`, which reads newline-delimited grader names from a
+file and returns them as a list of strings.
+"""
 
 from typing import List
 import pathlib as pl

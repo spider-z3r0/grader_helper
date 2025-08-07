@@ -1,5 +1,9 @@
 #!/usr/bin/env python
+"""Import model instances from YAML definitions.
 
+Exports :func:`import_item_from_yaml`, which reads a YAML file and returns a
+``Course`` or ``CourseWork`` instance based on the file's contents.
+"""
 
 from grader_helper.models import Course, CourseWork
 from grader_helper.dependencies import ym, pl
