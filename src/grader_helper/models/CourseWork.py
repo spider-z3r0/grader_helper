@@ -4,19 +4,34 @@
 from enum import Enum
 from typing import Self
 from grader_helper.dependencies import (
-    BaseModel, ConfigDict, pl, datetime, PositiveFloat, pd, np
+    BaseModel,
+    ConfigDict,
+    pl,
+    datetime,
+    PositiveFloat,
+    pd,
+    np,
+    log,
 )
 from .Documents import ClassList, GradeFile, FileType
 
 
 class CourseWorkType(Enum):
-    Exam = 'exam'
-    Assignment = 'assignment'
-    Online_MCQ = 'online_mcq'
-    InPerson_MCQ = 'inperson_mcq'
+    """Types of coursework supported by the system."""
+
+    Exam = "exam"
+    Assignment = "assignment"
+    Online_MCQ = "online_mcq"
+    InPerson_MCQ = "inperson_mcq"
 
 
 class CourseWork(BaseModel):
+    """Model representing an individual piece of coursework.
+
+    Stores metadata about the coursework such as grading weights,
+    associated graders and students, and paths to relevant documents.
+    """
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
     name: str
     root: pl.Path
@@ -31,6 +46,8 @@ class CourseWork(BaseModel):
     completed: bool = False
 
     def toggle_ready(self) -> Self:
+        """Toggle the ready status of the coursework."""
+
         self.ready = not self.ready
         return self
 
@@ -56,67 +73,59 @@ class CourseWork(BaseModel):
             ]
         return self
 
-    def set_students(
-            self, file: GradeFile) -> Self:
-        """
-        Imports a dataframe of students from the Gradesfile exported from Brightspace.
-        The 'file path' must be a feild in the
+    def set_students(self, file: GradeFile) -> Self:
+        """Load a roster of students from a Brightspace grade file.
 
         Parameters
         ----------
-        file : pathlib.Path
-            The path to the CSV file containing the Brightspace classlist.
-        assignment_name : str
-            The name of the assignment.
-
-        Returns
-        -------
-        pandas DataFrame
-            The Brightspace classlist.
-        """
-        # Check if the file is a CSV file
-        if file.type != FileType.XL:
-            raise ValueError("File must be a .xlsx file.")
-
-        try:
-
-            classlist_df = pd.read_excel(file.path)
-
-            classlist_df.columns = [str(i).lower().strip().replace(
-                ' ', '_').replace('-', '_') for i in classlist_df.columns]
-
-            classlist_df.insert(
-                len(classlist_df.columns)-1,
-                f"{self.name.lower().replace(' ', '_').strip()}",
-                ''
-            )
-            # classlist_df.insert(
-            #     -1,
-            #     f"{self.name.lower().replace(' ', '_').strip()}",
-            # '')
-            self.students = classlist_df
-
-            return self
-
-        except Exception as e:
-            print(f"Error occurred while importing Brightspace classlist: {e}")
-            return None
-
-    def assign_graders_individual(self):
-        """
-        Assigns graders randomly to students.
+        file : GradeFile
+            Wrapper containing the path to the exported Brightspace class list.
 
         Returns
         -------
         Self
-            The updated object with graders assigned.
+            The updated instance with the student data populated.
+
+        Raises
+        ------
+        ValueError
+            If ``file`` is not an Excel file.
+        RuntimeError
+            If the file cannot be read into a dataframe.
         """
+        if file.type != FileType.XL:
+            raise ValueError("File must be a .xlsx file.")
+
+        try:
+            classlist_df = pd.read_excel(file.path)
+
+            classlist_df.columns = [
+                str(i).lower().strip().replace(" ", "_").replace("-", "_")
+                for i in classlist_df.columns
+            ]
+
+            classlist_df.insert(
+                len(classlist_df.columns) - 1,
+                f"{self.name.lower().replace(' ', '_').strip()}",
+                "",
+            )
+            self.students = classlist_df
+
+            return self
+
+        except Exception as e:  # pragma: no cover - rare I/O failure
+            raise RuntimeError(
+                "Error occurred while importing Brightspace classlist"
+            ) from e
+
+    def assign_graders_individual(self) -> Self:
+        """Randomly assign graders to individual students."""
+
         if self.students is None or self.students.empty:
-            raise ValueError(
-                "No student data loaded. Run self.set_students() first.")
+            raise ValueError("No student data loaded. Run self.set_students() first.")
 
         if "grader" in self.students.columns:
-            print("Graders already assigned. Existing distribution retained.")
+            log.info("Graders already assigned. Existing distribution retained.")
             return self
 
         if len(self.graders) < 1:
@@ -130,15 +139,12 @@ class CourseWork(BaseModel):
             "grader",
             pd.Series(
                 np.random.permutation(
-                    np.tile(self.graders, int(
-                        np.ceil(n_students / len(self.graders))))
+                    np.tile(self.graders, int(np.ceil(n_students / len(self.graders))))
                 )[:n_students],
-                index=df.index
-            )
+                index=df.index,
+            ),
         )
 
         self.students = df
-        for i in self.students.columns:
-            print(i)
 
         return self
