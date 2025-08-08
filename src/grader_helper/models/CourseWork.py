@@ -1,24 +1,16 @@
-#!/usr/bin/env python
 
+#!/usr/bin/env python
 
 from enum import Enum
 from typing import Self
 from grader_helper.dependencies import (
-    BaseModel,
-    ConfigDict,
-    pl,
-    datetime,
-    PositiveFloat,
-    pd,
-    np,
-    log,
+    BaseModel, ConfigDict, pl, datetime, PositiveFloat,
+    PrivateAttr, pd, np, log
 )
-from .Documents import ClassList, GradeFile, FileType
+from grader_helper.helpers import path_cathcer
 
 
 class CourseWorkType(Enum):
-    """Types of coursework supported by the system."""
-
     Exam = "exam"
     Assignment = "assignment"
     Online_MCQ = "online_mcq"
@@ -26,18 +18,21 @@ class CourseWorkType(Enum):
 
 
 class CourseWork(BaseModel):
-    """Model representing an individual piece of coursework.
+    """Represents one piece of coursework.
 
-    Stores metadata about the coursework such as grading weights,
-    associated graders and students, and paths to relevant documents.
+    Public (persisted) fields store metadata and a path to the class list.
+    The in‑memory class list is held in a private attribute and never serialized.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
     name: str
     root: pl.Path
     weight: PositiveFloat
-    graders: list[str] = []
-    students: pd.DataFrame | None = None
+    graders: list[str] = []  # default to list to avoid None/len issues
+    class_list_path: pl.Path | None = None  # persisted path only
+    _class_list: pd.DataFrame | None = PrivateAttr(
+        default=None)  # runtime only
     type: CourseWorkType
     due_date: datetime.datetime
     rubric: pl.Path
@@ -45,106 +40,130 @@ class CourseWork(BaseModel):
     ready: bool = False
     completed: bool = False
 
-    def toggle_ready(self) -> Self:
-        """Toggle the ready status of the coursework."""
+    # ---------- Runtime data management ----------
 
-        self.ready = not self.ready
-        return self
-
-    def set_graders(self, file: pl.Path) -> Self:
+    def set_class_list_path(self, path: pl.Path | str, update: bool = False) -> Self:
         """
-        Loads a list of graders from a text file.
+        Set the persisted path to the class list file.
 
         Parameters
         ----------
-        file : pathlib.Path
-        The path to the text file containing the list of graders.
-
-        Returns
-        -------
-        List[str]
-        A list of graders.
-        """
-        if len(self.graders) != 0:
-            raise ValueError("Graders already set for this assignment")
-        with open(file, "r") as f:
-            self.graders = [
-                i.strip() for i in f.readlines() if i.strip()
-            ]
-        return self
-
-    def set_students(self, file: GradeFile) -> Self:
-        """Load a roster of students from a Brightspace grade file.
-
-        Parameters
-        ----------
-        file : GradeFile
-            Wrapper containing the path to the exported Brightspace class list.
+        path : pathlib.Path | str
+            User-provided path to the class list.
+        update : bool
+            If False and a path already exists, raise to avoid accidental overwrite.
 
         Returns
         -------
         Self
-            The updated instance with the student data populated.
 
         Raises
         ------
         ValueError
-            If ``file`` is not an Excel file.
-        RuntimeError
-            If the file cannot be read into a dataframe.
+            If a path is already set and update is False, or the string cannot be parsed.
+        TypeError
+            If `path` is neither str nor Path.
+        FileNotFoundError
+            If `path` does not exist on disk.  (Keep/omit per v1 policy.)
         """
-        if file.type != FileType.XL:
-            raise ValueError("File must be a .xlsx file.")
+        if self.class_list_path is not None and not update:
+            raise ValueError(
+                "Class list path is already set. Call with update=True to replace it."
+            )
+
+        if isinstance(path, str):
+            parsed = path_catcher(path)
+        elif isinstance(path, pl.Path):
+            parsed = path
+        else:
+            raise TypeError("`path` must be a str or a pathlib.Path.")
+
+        # v1 guardrails (enable if desired)
+        if not parsed.exists():
+            raise FileNotFoundError(f"No such file or directory: {parsed}")
+        if parsed.suffix.lower() not in {".xlsx", ".csv"}:
+            raise ValueError(f"Unsupported class list type: {parsed.suffix}")
+
+        self.class_list_path = parsed
+        return self
+
+    def load_class_list(self) -> Self:
+        """Load the class list DataFrame from `class_list_path`."""
+        if self.class_list_path is None:
+            raise FileNotFoundError(
+                "No class_list_path set. Provide a path or call set_class_list_path() with a pl.Path or str object."
+            )
+        if not self.class_list_path.exists():
+            raise FileNotFoundError(
+                f"Class list file not found: {self.class_list_path}"
+            )
+        if self.class_list_path.suffix.lower() != FileType.XL.value:
+            raise ValueError(
+                f"Expected an Excel (.xlsx) class list, got {
+                    self.class_list_path.suffix!r}."
+            )
 
         try:
-            classlist_df = pd.read_excel(file.path)
+            df = pd.read_excel(self.class_list_path)
+        except Exception as e:  # pragma: no cover
+            raise RuntimeError("Failed to read class list Excel file.") from e
 
-            classlist_df.columns = [
-                str(i).lower().strip().replace(" ", "_").replace("-", "_")
-                for i in classlist_df.columns
-            ]
+        df.columns = [
+            str(c).lower().strip().replace(" ", "_").replace("-", "_")
+            for c in df.columns
+        ]
+        # create a coursework-specific column (blank) if absent
+        cw_col = self.name.lower().replace(" ", "_").strip()
+        if cw_col not in df.columns:
+            df.insert(len(df.columns), cw_col, "")
 
-            classlist_df.insert(
-                len(classlist_df.columns) - 1,
-                f"{self.name.lower().replace(' ', '_').strip()}",
-                "",
-            )
-            self.students = classlist_df
+        self._class_list = df
+        return self
 
-            return self
+    # ---------- Admin operations ----------
 
-        except Exception as e:  # pragma: no cover - rare I/O failure
-            raise RuntimeError(
-                "Error occurred while importing Brightspace classlist"
-            ) from e
+    def set_graders(self, file: pl.Path) -> Self:
+        """Load graders from a text file (one name per line)."""
+        if self.graders:  # already set
+            raise ValueError("Graders already set for this assignment.")
+        if not file.exists():
+            raise FileNotFoundError(f"Graders file not found: {file}")
+
+        with open(file, "r", encoding="utf-8") as f:
+            self.graders = [line.strip() for line in f if line.strip()]
+        return self
 
     def assign_graders_individual(self) -> Self:
-        """Randomly assign graders to individual students."""
+        """Randomly assign graders to each student (idempotent if already assigned)."""
+        if self._class_list is None or self._class_list.empty:
+            raise ValueError(
+                "No student data loaded. Call load_students() or set_students() first.")
+        if not self.graders:
+            raise ValueError(
+                "No graders associated with this coursework. Set graders first.")
 
-        if self.students is None or self.students.empty:
-            raise ValueError("No student data loaded. Run self.set_students() first.")
-
-        if "grader" in self.students.columns:
+        df = self._class_list
+        if "grader" in df.columns:
             log.info("Graders already assigned. Existing distribution retained.")
             return self
 
-        if len(self.graders) < 1:
-            raise ValueError("No graders associated with this coursework.")
-
-        n_students = len(self.students)
-
-        df = self.students.copy()
+        n = len(df)
+        df = df.copy()
         df.insert(
-            len(df.columns) - 2,
+            len(df.columns),  # append at end
             "grader",
             pd.Series(
                 np.random.permutation(
-                    np.tile(self.graders, int(np.ceil(n_students / len(self.graders))))
-                )[:n_students],
+                    np.tile(self.graders, int(
+                        np.ceil(n / max(len(self.graders), 1))))
+                )[:n],
                 index=df.index,
             ),
         )
-
-        self.students = df
-
+        self._class_list = df
         return self
+
+    # ---------- Misc ----------
+    def toggle_ready(self) -> Self:
+        self.ready = not self.ready
+ self

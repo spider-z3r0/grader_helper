@@ -1,12 +1,13 @@
+
 #!/usr/bin/env python
 
+import datetime
 import pytest
 from grader_helper.models import (
     ClassList, GradeFile, Calendar, HandBook, FileType,
     CourseWorkType, CourseWork, Course
 )
 from grader_helper.dependencies import pl, pd
-import datetime
 
 
 @pytest.fixture
@@ -20,35 +21,17 @@ def output_dir():
 
 
 @pytest.fixture
-def dummy_classlist():
-    return ClassList(
-        path=pl.Path("/fake/path/to/classlist.xlsx"),
-        type=FileType.XL,
-        ready=False
-    )
+def fake_class_list():
 
 
 @pytest.fixture
-def dummy_handbook():
-    return HandBook(
-        path=pl.Path("/fake/path/to/handbook.pdf"),
-        ready=False
-    )
-
-
-@pytest.fixture
-def example_graders_txt(resources_dir):
-    return resources_dir / "graders.txt"
-
-
-@pytest.fixture
-def dummy_gradefile(resources_dir):
-    return GradeFile(
-        path=resources_dir / "fake_class_list.xlsx",
-        ready=True,
-        completed=False,
-        type=FileType.XL
-    )
+def example_graders_txt(resources_dir, tmp_path):
+    # ensure file exists even if resources/graders.txt isn’t present on CI
+    p = resources_dir / "graders.txt"
+    if not p.exists():
+        resources_dir.mkdir(parents=True, exist_ok=True)
+        p.write_text("alice\nbob\ncharlie\n", encoding="utf-8")
+    return p
 
 
 @pytest.fixture
@@ -60,21 +43,31 @@ def dummy_calendar():
 
 
 @pytest.fixture
-def dummy_coursework_min():
+def dummy_coursework_min(tmp_path):
+    # create an empty xlsx to act as the class list for minimal CW if needed
+    # not used unless tests call load_students()
+    (tmp_path / "dummy.xlsx").write_bytes(b"")
     return CourseWork(
         name="Test Assignment",
-        root=pl.Path("/fake/path/to/coursework"),
+        root=tmp_path,
         weight=50.0,
         type=CourseWorkType.Assignment,
         due_date=datetime.datetime(2025, 12, 15, 17, 0),
-        rubric=pl.Path("/fake/path/to/rubric.pdf"),
-        feedback_sheet=pl.Path("/fake/path/to/feedback.xlsx")
+        rubric=tmp_path / "rubric.pdf",
+        feedback_sheet=tmp_path / "feedback.xlsx",
+        class_list_path=tmp_path / "dummy.xlsx",
     )
 
 
 @pytest.fixture
-def dummy_cw_full(tmp_path):
-    return CourseWork(
+def dummy_cw_full(tmp_path, example_graders_txt):
+    # real class list Excel with a few rows
+    df = pd.DataFrame(
+        {"student_id": [101, 102, 103], "name": ["Anna", "Ben", "Cara"]})
+    xlsx = tmp_path / "classlist.xlsx"
+    df.to_excel(xlsx, index=False)
+
+    cw = CourseWork(
         name="Advanced Quant Methods",
         root=tmp_path,
         weight=50.0,
@@ -85,12 +78,10 @@ def dummy_cw_full(tmp_path):
         graders=["alice", "bob", "charlie"],
         ready=True,
         completed=False,
-        students=pd.DataFrame({
-            "student_id": [101, 102, 103],
-            "name": ["Anna", "Ben", "Cara"],
-            "grader": ["alice", "bob", "charlie"]
-        })
+        class_list_path=xlsx,
     )
+    # tests can call cw.load_students() before assigners
+    return cw
 
 
 @pytest.fixture
@@ -174,6 +165,10 @@ def dummy_course_dict(tmp_path):
 
 @pytest.fixture
 def dummy_cw_dict(tmp_path):
+    # updated: remove 'students', provide class_list_path
+    df = pd.DataFrame({"student_id": [101], "name": ["Anna"]})
+    xlsx = tmp_path / "cw_dict_classlist.xlsx"
+    df.to_excel(xlsx, index=False)
     return {
         "name": "Advanced Quant Methods",
         "root": tmp_path,
@@ -185,9 +180,66 @@ def dummy_cw_dict(tmp_path):
         "graders": ["alice", "bob", "charlie"],
         "ready": True,
         "completed": False,
-        "students": pd.DataFrame([
-            {"student_id": 101, "name": "Anna", "grader": "alice"},
-            {"student_id": 102, "name": "Ben", "grader": "bob"},
-            {"student_id": 103, "name": "Cara", "grader": "charlie"}
-        ])
+        "class_list_path": xlsx,
     }
+
+
+# path-string fixtures unchanged from earlier suggestion
+@pytest.fixture
+def existing_xlsx_path_str(tmp_path):
+    p = tmp_path / "test.xlsx"
+    p.touch()
+    return str(p)
+
+
+@pytest.fixture
+def existing_csv_path_str(tmp_path):
+    p = tmp_path / "test.csv"
+    p.touch()
+    return str(p)
+
+
+@pytest.fixture
+def existing_docx_path_str(tmp_path):
+    p = tmp_path / "test.docx"
+    p.touch()
+    return str(p)
+
+
+@pytest.fixture
+def nonexistent_file_path_str(tmp_path):
+    return str(tmp_path / "missing.xlsx")
+
+
+@pytest.fixture
+def existing_dir_path_str(tmp_path):
+    return str(tmp_path)
+
+
+@pytest.fixture
+def nonexistent_dir_path_str(tmp_path):
+    return str(tmp_path / "missing_dir")
+
+
+@pytest.fixture
+def fake_classlist_df():
+    """Synthetic Brightspace-style gradebook DataFrame for testing."""
+    data = {
+        "orgdefinedid": [f"{56000000 + i}" for i in range(1, 21)],
+        "username": [f"user{i}" for i in range(1, 21)],
+        "last_name": [
+            "Smith", "Jones", "Taylor", "Brown", "Williams",
+            "Johnson", "Davis", "Miller", "Wilson", "Moore",
+            "Anderson", "Thomas", "Jackson", "White", "Harris",
+            "Martin", "Thompson", "Garcia", "Martinez", "Robinson"
+        ],
+        "first_name": [
+            "Alice", "Bob", "Charlie", "Diana", "Ethan",
+            "Fiona", "George", "Hannah", "Ian", "Julia",
+            "Kevin", "Laura", "Michael", "Nina", "Oscar",
+            "Paula", "Quinn", "Rachel", "Steven", "Tina"
+        ],
+        "email": [f"user{i}@studentmail.ul.ie" for i in range(1, 21)],
+        "end_of_line_indicator": ["#"] * 20
+    }
+    return pd.DataFrame(data)

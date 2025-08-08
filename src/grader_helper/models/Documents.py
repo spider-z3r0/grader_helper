@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+
 """Document-related models for the grader helper.
 
 This module defines simple Pydantic models used to describe various

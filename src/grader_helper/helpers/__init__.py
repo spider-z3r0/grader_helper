@@ -6,8 +6,10 @@ class from a YAML mapping.
 """
 
 from .guess_model_type import guess_model_type
+from .path_catcher import path_catcher
 
 
 __all__ = [
     "guess_model_type",
+    "path_catcher",
 ]
