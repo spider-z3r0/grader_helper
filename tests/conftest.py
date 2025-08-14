@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python
 
 import datetime
@@ -21,10 +20,6 @@ def output_dir():
 
 
 @pytest.fixture
-def fake_class_list():
-
-
-@pytest.fixture
 def example_graders_txt(resources_dir, tmp_path):
     # ensure file exists even if resources/graders.txt isn’t present on CI
     p = resources_dir / "graders.txt"
@@ -32,14 +27,6 @@ def example_graders_txt(resources_dir, tmp_path):
         resources_dir.mkdir(parents=True, exist_ok=True)
         p.write_text("alice\nbob\ncharlie\n", encoding="utf-8")
     return p
-
-
-@pytest.fixture
-def dummy_calendar():
-    return Calendar(
-        path=pl.Path("/fake/path/to/calendar.ics"),
-        ready=True
-    )
 
 
 @pytest.fixture

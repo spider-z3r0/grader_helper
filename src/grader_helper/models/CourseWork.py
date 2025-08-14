@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python
 
 from enum import Enum
@@ -7,7 +6,7 @@ from grader_helper.dependencies import (
     BaseModel, ConfigDict, pl, datetime, PositiveFloat,
     PrivateAttr, pd, np, log
 )
-from grader_helper.helpers import path_cathcer
+from grader_helper.helpers import path_catcher
 
 
 class CourseWorkType(Enum):
@@ -32,6 +31,9 @@ class CourseWork(BaseModel):
     graders: list[str] = []  # default to list to avoid None/len issues
     class_list_path: pl.Path | None = None  # persisted path only
     _class_list: pd.DataFrame | None = PrivateAttr(
+        default=None)  # runtime only
+    grades_file: pl.Path | None = None  # persisted path only
+    _grades_sheet: pd.DataFrame | None = PrivateAttr(
         default=None)  # runtime only
     type: CourseWorkType
     due_date: datetime.datetime
@@ -97,32 +99,61 @@ class CourseWork(BaseModel):
             raise FileNotFoundError(
                 f"Class list file not found: {self.class_list_path}"
             )
-        if self.class_list_path.suffix.lower() != FileType.XL.value:
+        suffix = self.class_list_path.suffix.lower()
+        if suffix not in ['.csv', '.xlsx']:
             raise ValueError(
-                f"Expected an Excel (.xlsx) class list, got {
-                    self.class_list_path.suffix!r}."
+                f"Expected an Excel (.xlsx) or .csv class list, got {
+                    suffix!r}."
             )
 
         try:
-            df = pd.read_excel(self.class_list_path)
+            if suffix == '.xlsx':
+                df = pd.read_excel(self.class_list_path)
+            else:
+                df = pd.read_csv(self.class_list_path)
         except Exception as e:  # pragma: no cover
-            raise RuntimeError("Failed to read class list Excel file.") from e
-
-        df.columns = [
-            str(c).lower().strip().replace(" ", "_").replace("-", "_")
-            for c in df.columns
-        ]
-        # create a coursework-specific column (blank) if absent
-        cw_col = self.name.lower().replace(" ", "_").strip()
-        if cw_col not in df.columns:
-            df.insert(len(df.columns), cw_col, "")
+            raise RuntimeError(f"Failed to read class list file."
+                               f"\n{e}") from e
 
         self._class_list = df
         return self
 
+    def create_grades_sheet(self) -> Self:
+        if self._class_list is None or self._class_list.empty:
+            raise ValueError(
+                    "The class list must be available in order to create a grading sheet for this assignment. "
+                    "Please run the load_class list method, and then rerun this method."
+            )
+
+        # 1. Make a copy of the _class_list df
+        df = self._class_list.copy()
+        # 1.5. Drop the columns we don't want and rename some of the columns we do
+        df = df.drop(columns=['End-of-Line Indicator', "OrgDefinedId"])
+        df = df.rename({"Username": "Student ID"}, axis=1)
+        # 2. Normalise the columns
+        df.columns = [i.strip().lower().replace(' ', '_') for i in df.columns]
+        # Check if the assignment name is in the _class_list.columns
+        if not self.name.lower().replace(' ', '_') in any(self._class_list.columns):
+            # Add a score column if it isn't
+            df["score"] = 0
+        else:
+            # Rename the column that contains self.name
+            df.rename({
+                      [i for i in df.columns if i.contains(self.name.lower().replace(' ', '_')][0]: 'score'
+            }, axis= 1)
+
+        # 4. Reindex the columns
+        df=df.reindex(columns=['student_id', 'score'])
+
+
+        self._grades_sheet=df
+
+        return self
+
+
     # ---------- Admin operations ----------
 
-    def set_graders(self, file: pl.Path) -> Self:
+    def set_graders_from_txt(self, file: pl.Path) -> Self:
         """Load graders from a text file (one name per line)."""
         if self.graders:  # already set
             raise ValueError("Graders already set for this assignment.")
@@ -130,7 +161,7 @@ class CourseWork(BaseModel):
             raise FileNotFoundError(f"Graders file not found: {file}")
 
         with open(file, "r", encoding="utf-8") as f:
-            self.graders = [line.strip() for line in f if line.strip()]
+            self.graders=[line.strip() for line in f if line.strip()]
         return self
 
     def assign_graders_individual(self) -> Self:
@@ -142,13 +173,13 @@ class CourseWork(BaseModel):
             raise ValueError(
                 "No graders associated with this coursework. Set graders first.")
 
-        df = self._class_list
+        df=self._class_list
         if "grader" in df.columns:
             log.info("Graders already assigned. Existing distribution retained.")
             return self
 
-        n = len(df)
-        df = df.copy()
+        n=len(df)
+        df=df.copy()
         df.insert(
             len(df.columns),  # append at end
             "grader",
@@ -160,10 +191,69 @@ class CourseWork(BaseModel):
                 index=df.index,
             ),
         )
-        self._class_list = df
+        self._grades_sheet=df
         return self
+
+    def save_grades_sheets(self) -> Self:
+        if self._grades_sheet is None or self._grades_sheet.empty:
+            raise ValueError(
+                    "The grades_sheet must be available in order to save a/the grading sheet(s) for this assignment. "
+                    "Please run the create_grades_sheet method, and then rerun this method."
+            )
+        if self.graders is not None and 'grader' not in self_grades_sheet.columns:
+            raise ValueError(
+                    "It appears that graders have not been assigned to the students for this piece of CourseWork. "
+                    "If you are grading this CourseWork on your own please clear the 'graders' field before running this again."
+            )
+
+        if self.graders is None and 'grader' not in self._grades_sheet.columns:
+            try:
+                if (self.root / f"grades.csv").exists():
+                    choice=input(
+                        f"grades.csv already exists. Do you want to overwrite it? (y/n): "
+                    )
+                    if choice[0].lower() != "y" or choice == "":
+                        print(f"Skipping writing")
+                        continue
+                else:
+                    self._grades_sheet.to_csv(
+                        self.root/"grades.csv", index=False)
+            except Exception as e:
+                raise RunktimeError(
+                        "Could not save grades sheet. "
+                ) from e
+        elif "grader" in self._grades_sheet.columns:
+            try:
+                # Loop over each grader
+                for g in self.graders:
+                    if (folder / f"{g}.xlsx").exists():
+                        choice=input(
+                            f"{g}.xlsx already exists. Do you want to overwrite it? (y/n): "
+                        )
+                        if choice[0].lower() != "y" or choice == "":
+                            print(f"Skipping {g}.xlsx")
+                            continue
+                        else:
+                            # Select the submissions assigned to the current grader
+                            grader_submissions=d.loc[d["grader"] == f"{g}"]
+                            # Save the submissions to an csv sheet
+                            grader_submissions.to_csv(
+                                self.root / f"{g}.csv", index=False)
+                    else:
+                        # Select the submissions assigned to the current grader
+                        grader_submissions=d.loc[d["grader"] == f"{g}"]
+                        # Save the submissions to an Excel sheet
+                        grader_submissions.to_csv(
+                            folder / f"{g}.csv", index=False)
+            except Exception as e:
+                print(f"An error occurred: {e}")
+
+
+
+
+
 
     # ---------- Misc ----------
     def toggle_ready(self) -> Self:
-        self.ready = not self.ready
+        self.ready=not self.ready
  self

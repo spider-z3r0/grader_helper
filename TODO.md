@@ -11,3 +11,6 @@
     1. weighted mark
     2. letter grade
     3. weighted letter grade
+
+
+[!NOTE] This model based API is good, but I need to work on pulling together v1 more effectively. I'll park this here and go back to the other functionality more general functional
