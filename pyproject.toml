@@ -9,9 +9,12 @@ license = "MIT"
 readme = "README.md"
 packages = [{include = "grader_helper"}]
 dependencies = [
+    "jupyter>=1.1.1",
+    "marimo>=0.14.17",
     "numpy>=2.2.1",
     "openpyxl>=3.1.5",
     "pandas>=2.2.3",
+    "python-calamine>=0.4.0",
     "tqdm>=4.67.1",
     "xlwings>=0.33.5",
 ]

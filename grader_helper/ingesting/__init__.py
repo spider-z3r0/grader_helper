@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#
 # -*- coding: utf-8 -*-
 
 """ This is the init file for the ingesting module."""
