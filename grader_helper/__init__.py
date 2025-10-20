@@ -13,6 +13,7 @@ from .ingesting.ingest_completed_graderfiles import ingest_completed_graderfiles
 # grader assignment
 from .assignment.assign_graders_individual import assign_graders_individual
 from .assignment.assign_graders_groups import assign_graders_groups
+from .assignment.find_unsubmitted import find_unsubmitted
 
 # dataframe operations
 from .dataframe_operations.make_letter_grade import make_letter_grade
@@ -34,6 +35,7 @@ from .file_operations.save_grader_sheets import save_grader_sheets
 from .file_operations.extract_studentid_grade import extract_studentid_grade
 from .file_operations.catch_grades import catch_grades
 from .file_operations.brightspace_name_folders import brightspace_name_folders
+from .file_operations.scan_multiple_submissions import make_sub_date, scan_multiple_subs
 
 __all__ = [
     "load_graders",
@@ -54,4 +56,7 @@ __all__ = [
     "check_for_weighted_columns",
     "prepare_data_for_departmental_template",
     "brightspace_name_folders",
+    "make_sub_date",
+    "scan_multiple_subs",
+    "find_unsubmitted"
 ]

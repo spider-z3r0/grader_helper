@@ -9,8 +9,8 @@ It is not intended to be run as a script.
 import logging as log
 import pandas as pd
 import numpy as np
-import xlwings as xw
 import pathlib as pl
+import xlwings as xw
 from shutil import copy2, copytree
 import re
 from tqdm import tqdm

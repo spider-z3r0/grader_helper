@@ -32,7 +32,8 @@ def brightspace_name_folders(df: pd.DataFrame, subs_folder: pl.Path):
                     )
                 except Exception as e:
                     print(
-                        f"Failed to rename folder {folder.name} to {new_folder_name}: {e}"
+                        f"Failed to rename folder {
+                            folder.name} to {new_folder_name}: {e}"
                     )
                     rename_attempts.append(
                         {

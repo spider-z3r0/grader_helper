@@ -18,6 +18,7 @@ from .grader_helper.assignment.assign_graders_individual import (
 )
 from .grader_helper.assignment.assign_graders_groups import assign_graders_groups
 
+from .grader_helper.assignment.find_unsubmitted import find_unsubmitted
 # dataframe operations
 from .grader_helper.dataframe_operations.make_letter_grade import make_letter_grade
 from .grader_helper.dataframe_operations.calculate_weighted_score import (
@@ -69,4 +70,5 @@ __all__ = [
     "check_for_weighted_columns",
     "prepare_data_for_departmental_template",
     "brightspace_name_folders",
+    "find_unsubmitted"
 ]

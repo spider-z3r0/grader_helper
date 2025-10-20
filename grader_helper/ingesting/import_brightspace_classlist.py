@@ -43,12 +43,20 @@ def import_brightspace_classlist(file: pl.Path, assignment_name: str | None = No
 
         match assignment_name:
             case str():
-                classlist_df = classlist_df[
-                    ["Username", "Last Name", "First Name", assignment_name]]
+                if 'Group' in classlist_df.columns:
+                    classlist_df = classlist_df[
+                        ["Username", "Last Name", "First Name", "Group", assignment_name]]
+                else:
+                    classlist_df = classlist_df[
+                        ["Username", "Last Name", "First Name",  assignment_name]]
             case None:
                 classlist_df['Score'] = np.nan
-                classlist_df = classlist_df[
-                    ["Username", "Last Name", "First Name", 'Score']]
+                if 'Group' in classlist_df.columns:
+                    classlist_df = classlist_df[
+                        ["Username", "Last Name", "First Name", "Group", "Score"]]
+                else:
+                    classlist_df = classlist_df[
+                        ["Username", "Last Name", "First Name",  "Score"]]
 
         # Clean the 'Username' column by renaming to 'Student ID' and dropping the '#' character
         classlist_df.rename(columns={"Username": "Student ID"}, inplace=True)

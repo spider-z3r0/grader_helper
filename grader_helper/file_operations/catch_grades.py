@@ -1,51 +1,65 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from ..dependencies import pd, os, tqdm, ThreadPoolExecutor, pl
+from ..dependencies import pd, pl, tqdm
 from .extract_studentid_grade import extract_studentid_grade
-
+import logging
 
 def catch_grades(directory: pl.Path, cell: str) -> pd.DataFrame:
     """
-    Iterates through a directory of student submissions, finds the student's feedback file, and extracts the grade.
-    Args:
-        directory (str): The directory containing the student submissions subdirectories.
-        cell (str): The cell containing the grade in the feedback file.
-
-    Returns:
-        pd.DataFrame: A DataFrame containing the student ID and grade.
-
-    Note:
-        This should allow you to compare the grades in the feedback files with the grades in the master file.
+    Walk `directory`, find .xlsx/.xlsm/.xlsb feedback files, extract (student_id, grade)
+    serially, and return a DataFrame with columns ["Student ID", "grade"].
     """
-    # check if directory is a Path object
     if not isinstance(directory, pl.Path):
         raise TypeError("directory must be a Path object")
-    # check if cell is a string
     if not isinstance(cell, str):
         raise TypeError("cell must be a string")
+    if not directory.exists():
+        raise FileNotFoundError(f"Directory not found: {directory}")
 
-    data = []  # List to store the student ID and grade
+    # Case-insensitive match on stem; include common Excel formats
+    exts = {".xlsx", ".xlsm", ".xlsb", ".xls"}
+    file_paths = [
+        p for p in directory.rglob("*")
+        if p.suffix.lower() in exts and "feedback sheet" in p.stem.lower()
+    ]
 
-    file_paths = []  # List to store the file paths
-    for file_path in directory.glob("**/*"):
-        try:
-            if file_path.suffix == ".xlsx" and "Feedback sheet" in file_path.stem:
-                file_paths.append(file_path)
-        except FileNotFoundError:
-            print(f"File not found: {file_path}")
+    data = []
+    for p in tqdm(file_paths, desc="Reading feedback"):
+        logging.debug(f"Reading: {p}")
+        res = extract_studentid_grade(p, cell, allow_xlwings_fallback=True)
+        if res is not None:
+            data.append(res)
+        else:
+            logging.warning(f"Skipped (no value): {p}")
 
-    with ThreadPoolExecutor() as executor, tqdm(total=len(file_paths)) as pbar:
-        futures = []
-        for file_path in file_paths:
-            future = executor.submit(extract_studentid_grade, file_path, cell)
-            future.add_done_callback(lambda _: pbar.update())
-            futures.append(future)
+    return pd.DataFrame(data, columns=["Student ID", "grade"])
 
-        for future in futures:
-            result = future.result()
-            if result:
-                data.append(result)
-
-    df = pd.DataFrame(data, columns=["Student ID", "grade"])
-    return df
+# def catch_grades(directory: pl.Path, cell: str) -> pd.DataFrame:
+#     """
+#     Walk `directory`, find .xlsx feedback files, extract (student_id, grade)
+#     serially, and return a DataFrame with columns ["Student ID", "grade"].
+#     """
+#     if not isinstance(directory, pl.Path):
+#         raise TypeError("directory must be a Path object")
+#     if not isinstance(cell, str):
+#         raise TypeError("cell must be a string")
+#     if not directory.exists():
+#         raise FileNotFoundError(f"Directory not found: {directory}")
+#
+#     # Case-insensitive match on stem; recurse only for .xlsx
+#     file_paths = [
+#         p for p in directory.rglob("*.xlsx")
+#         if "feedback sheet" in p.stem.lower()
+#     ]
+#
+#     data = []
+#     for p in tqdm(file_paths, desc="Reading feedback"):
+#         logging.debug(f"Reading: {p}")
+#         res = extract_studentid_grade(p, cell)
+#         if res is not None:
+#             data.append(res)
+#         else:
+#             logging.warning(f"Skipped (read error): {p}")
+#
+#     return pd.DataFrame(data, columns=["Student ID", "grade"])

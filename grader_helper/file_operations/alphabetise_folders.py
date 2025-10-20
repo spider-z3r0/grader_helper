@@ -3,6 +3,7 @@
 
 import pandas as pd
 import pathlib as pl
+from .scan_multiple_submissions import scan_multiple_subs
 
 
 def alphabetise_folders(df, subs_folder):
@@ -18,7 +19,21 @@ def alphabetise_folders(df, subs_folder):
     Args:
         df (pd.DataFrame): DataFrame containing columns 'Last Name', 'First Name', and 'Student ID'.
         subs_folder (Path): pathlib.Path object pointing to the directory containing the folders to be renamed.
+
+
     """
+    # test for multiple subs and fail if found. 
+    duplicates = scan_multiple_subs(subs_folder)
+    if duplicates:
+        body = "\n".join(
+            f" - {k}: {', '.join(map(str, v))}" for k, v in sorted(duplicates.items())
+        )
+        raise RuntimeError(
+            "The following students have multiple submissions:\n"
+            f"{body}\n"
+            "Please delete extras or consolidate into one folder."
+        )
+
     # Convert DataFrame to a dictionary for easier lookup
     name_id_map = {
         (row["Last Name"].upper(), row["First Name"].upper()): row["Student ID"]
@@ -42,7 +57,7 @@ def alphabetise_folders(df, subs_folder):
             matched = False
 
             for (last_name, first_name), student_id in name_id_map.items():
-                if last_name in folder_name_upper and first_name in folder_name_upper:
+                if last_name in folder_name_upper and student_id in folder_name_upper:
                     new_folder_name = f"{last_name}, {first_name} ({student_id})"
                     try:
                         folder.rename(subs_folder / new_folder_name)
@@ -70,7 +85,7 @@ def alphabetise_folders(df, subs_folder):
 
             if not matched:
                 for (last_name, first_name), student_id in name_id_map.items():
-                    if f" {first_name} " in folder_name_upper and not matched:
+                    if f" {student_id} " in folder_name_upper and not matched:
                         new_folder_name = f"{last_name}, {first_name} ({student_id})"
                         if ask_to_rename(folder.name, new_folder_name):
                             try:

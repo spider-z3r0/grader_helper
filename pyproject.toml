@@ -11,6 +11,7 @@ packages = [{include = "grader_helper"}]
 dependencies = [
     "jupyter>=1.1.1",
     "marimo>=0.14.17",
+    "matplotlib>=3.9,<3.10",
     "numpy>=2.2.1",
     "openpyxl>=3.1.5",
     "pandas>=2.2.3",
@@ -18,6 +19,7 @@ dependencies = [
     "tqdm>=4.67.1",
     "xlwings>=0.33.5",
 ]
+requires-python = ">=3.13"
 
 [build-system]
 requires = ["hatchling"]
