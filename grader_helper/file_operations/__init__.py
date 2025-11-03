@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 
-from .distribute_feedback_sheets import distribute_feedback_sheets
+from .distribute_feedback_sheets import distribute_feedback_sheets, distribute_feedback_sheets_groups
 from .alphabetise_folders import alphabetise_folders
 from .save_distributed_graders import save_distributed_graders
 from .save_grader_sheets import save_grader_sheets
@@ -13,6 +13,7 @@ from .brightspace_name_folders import brightspace_name_folders
 
 __all__ = [
     "distribute_feedback_sheets",
+    "distribute_feedback_sheets_groups",
     "alphabetise_folders",
     "save_distributed_graders",
     "save_grader_sheets",

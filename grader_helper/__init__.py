@@ -29,6 +29,7 @@ from .dataframe_operations.prepare_data_for_departmental_template import (
 
 # file operations
 from .file_operations.distribute_feedback_sheets import distribute_feedback_sheets
+from .file_operations.distribute_feedback_sheets import distribute_feedback_sheets_groups
 from .file_operations.alphabetise_folders import alphabetise_folders
 from .file_operations.save_distributed_graders import save_distributed_graders
 from .file_operations.save_grader_sheets import save_grader_sheets
@@ -40,6 +41,7 @@ from .file_operations.scan_multiple_submissions import make_sub_date, scan_multi
 __all__ = [
     "load_graders",
     "distribute_feedback_sheets",
+    "distribute_feedback_sheets_group",
     "assign_graders_individual",
     "assign_graders_groups",
     "import_brightspace_classlist",
