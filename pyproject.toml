@@ -1,29 +1,35 @@
-
 [project]
 name = "grader-helper"
-version = "0.1.12"
+version = "0.1.14"
 description = "Functions to help manage assignments from UL which are hosted on Brightspace"
 description-content-type = "text/markdown"
-authors = [{name = "Kevin O Malley", email = "kevomalley743@gmail.com"}]
+authors = [{name = "Kevin O Malley", email = "kev.c.omalley@pm.me"}]
 license = "MIT"
 readme = "README.md"
 packages = [{include = "grader_helper"}]
 dependencies = [
-    "jupyter>=1.1.1",
-    "marimo>=0.14.17",
-    "matplotlib>=3.9,<3.10",
     "numpy>=2.2.1",
     "openpyxl>=3.1.5",
     "pandas>=2.2.3",
     "python-calamine>=0.4.0",
     "tqdm>=4.67.1",
-    "xlwings>=0.33.5",
+    # Only install on Windows
+    "xlwings>=0.33.5; platform_system == 'Windows'",
 ]
 requires-python = ">=3.13"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "jupyter>=1.1.1",
+    "marimo>=0.14.17",
+    "matplotlib>=3.9,<3.10",
+    "faker = 38.2.0",
+]
+
 
 [tool.hatch.envs.default.dependencies]
 dev = [

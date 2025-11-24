@@ -3,7 +3,7 @@
 
 import logging
 import re
-from ..dependencies import xw, pythoncom, pd, pl
+from ..dependencies import xw, pythoncom, pd, pl, ON_WINDOWS
 from openpyxl import load_workbook
 
 
@@ -87,7 +87,7 @@ def _read_xlwings_value(path: pl.Path, cell: str):
                 pass
 
 
-def extract_studentid_grade(file_path: pl.Path, cell: str, *, allow_xlwings_fallback: bool = True):
+def extract_studentid_grade(file_path: pl.Path, cell: str, *, allow_xlwings_fallback: ON_WINDOWS):
     """
     Read a single cell from a feedback workbook and return (student_id, value).
 
@@ -129,49 +129,3 @@ def extract_studentid_grade(file_path: pl.Path, cell: str, *, allow_xlwings_fall
         logging.error(f"Error processing file '{file_path}': {e}")
         return None
 
-# def extract_studentid_grade(file_path: pl.Path, cell: str):
-#     """
-#     Open an .xlsx feedback file with Excel (xlwings/COM), read `cell`, and
-#     return (student_id, grade). Student ID = last space-separated token of stem.
-#     """
-#     app = None
-#     com_inited = False
-#     try:
-#         pythoncom.CoInitialize()
-#         com_inited = True
-#
-#         # Single hidden Excel instance per call; alerts off to avoid modals
-#         app = xw.App(visible=False, add_book=False)
-#         app.display_alerts = False
-#         app.screen_updating = False
-#
-#         wb = app.books.open(str(file_path))
-#         try:
-#             sheet = wb.sheets[0]
-#             student_id = pl.Path(file_path).stem.split(" ")[-1]
-#             grade = sheet[cell].value
-#         finally:
-#             wb.close()
-#
-#         return student_id, grade
-#
-#     except FileNotFoundError:
-#         logging.error(f"File not found: {file_path}")
-#         return None
-#     except IndexError as e:
-#         logging.error(f"Error extracting student ID from filename '{file_path}': {e}")
-#         return None
-#     except Exception as e:
-#         logging.error(f"Error processing file '{file_path}': {e}")
-#         return None
-#     finally:
-#         if app is not None:
-#             try:
-#                 app.quit()
-#             except Exception:
-#                 pass
-#         if com_inited:
-#             try:
-#                 pythoncom.CoUninitialize()
-#             except Exception:
-#                 pass
