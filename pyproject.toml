@@ -31,3 +31,11 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["grader_helper"]
 
+[tool.uv.sources]
+grader-helper = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "grader-helper",
+]
+

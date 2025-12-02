@@ -148,6 +148,11 @@ dependencies = [
     { name = "xlwings" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "grader-helper" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "matplotlib", specifier = ">=3.9,<3.10" },
@@ -158,6 +163,9 @@ requires-dist = [
     { name = "tqdm", specifier = ">=4.67.1" },
     { name = "xlwings", specifier = ">=0.33.5" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "grader-helper", editable = "." }]
 
 [[package]]
 name = "kiwisolver"
