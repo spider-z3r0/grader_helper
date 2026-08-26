@@ -27,7 +27,9 @@ dev = [
     "jupyter>=1.1.1",
     "marimo>=0.14.17",
     "matplotlib>=3.9,<3.10",
-    "faker = 38.2.0",
+    "faker>=38.2.0",
+    "pytest>=8.4.1",
+    "packaging>=24.0",
 ]
 
 
@@ -39,3 +41,10 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["grader_helper"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = [
+    "excel: requires a working Excel installation (Windows or macOS); skipped elsewhere",
+]

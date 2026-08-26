@@ -41,7 +41,7 @@ from .file_operations.scan_multiple_submissions import make_sub_date, scan_multi
 __all__ = [
     "load_graders",
     "distribute_feedback_sheets",
-    "distribute_feedback_sheets_group",
+    "distribute_feedback_sheets_groups",
     "assign_graders_individual",
     "assign_graders_groups",
     "import_brightspace_classlist",
