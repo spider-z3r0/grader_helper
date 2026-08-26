@@ -3,7 +3,7 @@
 
 import logging
 import re
-from ..dependencies import xw, pythoncom, pd, pl, ON_WINDOWS
+from ..dependencies import xw, pythoncom, pd, pl, NEEDS_COM_INIT
 from openpyxl import load_workbook
 
 
@@ -49,11 +49,25 @@ def _read_calamine_value(path: pl.Path, cell: str):
 
 def _read_xlwings_value(path: pl.Path, cell: str):
     """Force recalc via Excel/COM and read live value."""
+    if xw is None:
+        logging.debug(
+            "xlwings is unavailable, so %s cannot be recalculated; "
+            "only cached values can be read on this platform.",
+            path,
+        )
+        return None
+
     app = None
     com_inited = False
     try:
-        pythoncom.CoInitialize()
-        com_inited = True
+        # COM initialisation is Windows-only. On macOS xlwings drives Excel
+        # via AppleScript and pythoncom does not exist, so calling
+        # CoInitialize() there would raise AttributeError on None -- which
+        # the broad handler in extract_studentid_grade would swallow,
+        # silently returning None for every sheet.
+        if NEEDS_COM_INIT and pythoncom is not None:
+            pythoncom.CoInitialize()
+            com_inited = True
         app = xw.App(visible=False, add_book=False)
         app.display_alerts = False
         app.screen_updating = False
@@ -80,14 +94,16 @@ def _read_xlwings_value(path: pl.Path, cell: str):
                 app.quit()
             except Exception:
                 pass
-        if com_inited:
+        if com_inited and pythoncom is not None:
             try:
                 pythoncom.CoUninitialize()
             except Exception:
                 pass
 
 
-def extract_studentid_grade(file_path: pl.Path, cell: str, *, allow_xlwings_fallback: ON_WINDOWS):
+def extract_studentid_grade(
+    file_path: pl.Path, cell: str, *, allow_xlwings_fallback: bool = True
+):
     """
     Read a single cell from a feedback workbook and return (student_id, value).
 

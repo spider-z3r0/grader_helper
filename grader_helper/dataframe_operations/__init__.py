@@ -3,7 +3,6 @@
 
 """ This is the init file for the calculations module."""
 
-from matplotlib.pylab import f
 from .make_letter_grade import make_letter_grade
 from .calculate_weighted_score import calculate_weighted_score
 from .calculate_total_module_score import calculate_total_module_score

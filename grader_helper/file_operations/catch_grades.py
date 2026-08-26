@@ -27,7 +27,7 @@ def catch_grades(directory: pl.Path, cell: str) -> pd.DataFrame:
     data = []
     for p in tqdm(file_paths, desc="Reading feedback"):
         logging.debug(f"Reading: {p}")
-        res = extract_studentid_grade(p, cell, allow_xlwings_fallback=True)
+        res = extract_studentid_grade(p, cell)
         if res is not None:
             data.append(res)
         else:
