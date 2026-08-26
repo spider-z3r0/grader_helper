@@ -1,12 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-"""The package must import using only its declared runtime dependencies.
+"""The package must import using only its declared runtime dependencies."""
 
-These tests run in a subprocess so that ``sys.modules`` reflects exactly
-what importing grader_helper pulls in, uncontaminated by the test session.
-"""
-
+import ast
 import subprocess
 import sys
 import textwrap
@@ -14,10 +11,10 @@ import textwrap
 import pytest
 
 # Declared in [dependency-groups] dev, NOT in [project] dependencies. A dev
-# environment therefore has them installed even though an end user's
-# `pip install grader-helper` does not -- which is precisely how an
-# accidental import of one goes unnoticed until release.
-DEV_ONLY_PACKAGES = ["matplotlib", "marimo", "jupyter", "faker", "pytest"]
+# environment has them installed even though an end user's
+# `pip install grader-helper` does not -- which is how an accidental import
+# of one goes unnoticed until release.
+DEV_ONLY_PACKAGES = {"matplotlib", "marimo", "jupyter", "faker", "pytest"}
 
 
 def _run(code: str) -> subprocess.CompletedProcess:
@@ -28,6 +25,18 @@ def _run(code: str) -> subprocess.CompletedProcess:
     )
 
 
+def _imported_names(tree: ast.AST):
+    """Yield (top-level module name, lineno) for every import in `tree`."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                yield alias.name.split(".")[0], node.lineno
+        elif isinstance(node, ast.ImportFrom):
+            # Relative imports have no external module to check.
+            if node.level == 0 and node.module:
+                yield node.module.split(".")[0], node.lineno
+
+
 def test_package_imports():
     """Bare `import grader_helper` must succeed."""
     result = _run("import grader_helper")
@@ -36,26 +45,35 @@ def test_package_imports():
     )
 
 
-@pytest.mark.parametrize("package", DEV_ONLY_PACKAGES)
-def test_package_does_not_import_dev_only_dependency(package):
-    """Importing grader_helper must not pull in a dev-only package.
+def test_no_module_imports_a_dev_only_dependency(repo_root):
+    """No module in the package may import a dev-only package.
 
     Regression guard for the stray `from matplotlib.pylab import f` in
     dataframe_operations/__init__.py. matplotlib was correctly dropped from
-    the runtime dependencies, so that import makes a published release fail
-    at import time for every user on every platform -- while remaining
-    invisible in a dev environment, where matplotlib is installed.
+    the runtime dependencies, so that import made a published release fail
+    at import time for every user on every platform.
+
+    This is deliberately a static scan of our own source rather than a
+    check of sys.modules after import. sys.modules cannot distinguish "our
+    code imported matplotlib" from "a legitimate dependency imported it
+    because it happened to be installed" -- and xlwings does exactly that:
+    matplotlib is only an `all` extra of xlwings, but xlwings/utils.py
+    imports it opportunistically at import time. So a sys.modules check
+    passes on Linux (no xlwings) and fails on Windows and macOS (xlwings
+    present, matplotlib present via the dev group) without either outcome
+    saying anything about our code.
     """
-    result = _run(
-        f"""
-        import sys
-        import grader_helper
-        assert "{package}" not in sys.modules, (
-            "grader_helper imported {package}, which is not a runtime dependency"
-        )
-        """
+    offenders = []
+    for path in sorted((repo_root / "grader_helper").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for name, lineno in _imported_names(tree):
+            if name in DEV_ONLY_PACKAGES:
+                rel = path.relative_to(repo_root)
+                offenders.append(f"{rel}:{lineno} imports {name}")
+
+    assert not offenders, "dev-only imports in package source:\n" + "\n".join(
+        offenders
     )
-    assert result.returncode == 0, result.stderr.strip().splitlines()[-1]
 
 
 def test_repo_root_does_not_shadow_the_package(repo_root):
