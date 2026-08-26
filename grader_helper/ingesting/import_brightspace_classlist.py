@@ -49,13 +49,16 @@ def import_brightspace_classlist(file: pl.Path, group: bool = False, normalise: 
             classlist_df = classlist_df.rename(columns={'Group Name':'Group'})
             classlist_df = classlist_df[
                 ["Student ID", "Last Name", "First Name", "Group", "Score"]]
-            # Clean the 'Username' column by renaming to 'Student ID' and dropping the '#' character
-            classlist_df.rename(columns={"Username": "Student ID"}, inplace=True)
         else:
             classlist_df = classlist_df[
                 ["Student ID", "Last Name", "First Name", "Score"]]
-            classlist_df["Student ID"] = classlist_df["Student ID"].str.replace(
-                "#", "")
+
+        # Brightspace writes the username as "#56170559". Every downstream
+        # consumer matches on the bare digits parsed out of a submission
+        # folder name, so the '#' has to go in both modes -- the group branch
+        # previously skipped this and nothing matched.
+        classlist_df["Student ID"] = classlist_df["Student ID"].str.replace(
+            "#", "")
 
 
         if normalise:
