@@ -185,3 +185,16 @@ def two_coursework_module():
             make_assessment(id="cw2", name="Coursework 2", weight=60),
         ]
     )
+
+
+@pytest.fixture
+def fake_module(tmp_path):
+    """A whole module on disk: class list, submissions, marked feedback sheets.
+
+    See tests/fake_module.py. The feedback sheets are real workbooks with
+    real numbers in them, so this exercises the Excel reading that mocked
+    fixtures skip.
+    """
+    from fake_module import make_fake_module
+
+    return make_fake_module(tmp_path / "PS4001")

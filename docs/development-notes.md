@@ -179,7 +179,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 264 tests:
+Done, 276 tests:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -194,6 +194,7 @@ Done, 264 tests:
   column names — see below
 - `init_module` writes a starter `module.toml`, comments and all
 - The four Excel-writing functions covered and repaired — see below
+- A whole fake module on disk, and an end-to-end test over it
 
 ### The rewire onto `Module`
 
@@ -326,12 +327,66 @@ the refusal fired before anything was written and a per-file check passed by
 luck. Moving the clash to the last grader made it a real test. Worth
 remembering that "reintroduce the bug" catches bad tests, not just bad code.
 
+### The fake module, and the end-to-end test
+
+`tests/fake_module.py` writes a complete module to disk: `module.toml`, a
+Brightspace class-list export, a submissions tree in Brightspace folder
+format, and **real `.xlsx` feedback sheets with real numbers in `D30`**.
+`tests/test_end_to_end.py` drives it from unzipped download to departmental
+grade sheet.
+
+The workbooks being real is the point. Everywhere else in the suite
+`extract_studentid_grade` is monkeypatched out, so this is the only place the
+Excel read itself is exercised. Swapping the workbooks for empty placeholders
+— which is what the older fixtures wrote — collapses the end-to-end test, so
+it is genuinely testing the read.
+
+The fixture holds the marks it wrote, so the test asserts the pipeline gives
+back what went in rather than merely running. The cohort is chosen, not
+random, and the awkward cases are deliberate:
+
+| student | why |
+|---|---|
+| 23304305 | totals exactly 64.5 — Excel 65 (B2), Python 64 (B3) |
+| 23304309 | scored 0 throughout → NG, not F |
+| 00123456 | a leading zero, destroyed by an unguarded Excel round trip |
+| 23304311 | in the class list, never submitted |
+| 23304307 | submitted twice |
+
+Plus a `__MACOSX` folder and a stray `index.html`, which every real download
+has.
+
+It runs as a pytest fixture (`fake_module`), and standalone for a notebook:
+
+```
+python tests/fake_module.py ~/scratch/PS4001
+```
+
+Two things the walkthrough surfaced, neither a bug:
+
+- **A non-submitter and a student who scored zero are indistinguishable on
+  the sheet.** Both come out `NG`. That is faithful to the departmental
+  sheet, which computes `IF(ROUND(total,2) > 0, <bands>, "NG")` and cannot
+  tell them apart either — but it means the sheet alone does not tell you
+  which happened.
+- **`catch_grades` reads whichever feedback sheet it finds**, so a
+  resubmission needs resolving before marking, not after. `scan_multiple_subs`
+  finds them; nothing yet decides which one counts.
+
 ### Known gaps
 
 - `make_sub_date` cannot parse `"0000 AM"` (`%I` is 12-hour). Brightspace
   appears to use `"1200 AM"`, so it may never bite. `xfail`.
 - `assignment/visualise.py` defines its function inside `main()`, so it is
   unreachable and unexported. Delete or fix; do not port.
+- **`brightspace_name_folders` has no tests at all.** It is the last step
+  before re-upload, so a failure there reaches students. It also mutates the
+  caller's DataFrame in place (upper-casing `Suggested Name` and `Original
+  Name`), writes two CSV logs as side effects, wraps the rename in a bare
+  `except Exception`, and returns nothing.
+- **No moderation pack.** `Assessment.status.moderated` and
+  `Module.internal_moderator` exist, but nothing samples submissions or
+  stratifies them by letter grade. A feature to build, not a gap to cover.
 - A `.pyc` is tracked despite `.gitignore` listing `__pycache__/`. Ignore
   rules do not apply to already-tracked files: `git rm --cached` it.
 
