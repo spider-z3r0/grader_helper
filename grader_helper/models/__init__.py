@@ -5,7 +5,12 @@
 
 from .assessment import Assessment, AssessmentStatus, AssessmentType
 from .module import SCHEMA_VERSION, Module, ModulePaths
-from .module_file import MODULE_FILENAME, ModuleFile, load_module
+from .module_file import (
+    MODULE_FILENAME,
+    ModuleFile,
+    init_module,
+    load_module,
+)
 from .people import Person, as_person
 
 __all__ = [
@@ -16,6 +21,7 @@ __all__ = [
     "ModuleFile",
     "ModulePaths",
     "MODULE_FILENAME",
+    "init_module",
     "load_module",
     "Person",
     "SCHEMA_VERSION",

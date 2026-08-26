@@ -46,6 +46,7 @@ import tomlkit
 from tomlkit.items import AoT, Table
 
 from .module import SCHEMA_VERSION, Module
+from .people import Person, as_person
 
 #: Conventional filename at the module root.
 MODULE_FILENAME = "module.toml"
@@ -74,33 +75,7 @@ class ModuleFile:
             )
 
         document = tomlkit.parse(path.read_text(encoding="utf-8"))
-        data = _plain(document)
-
-        found = data.get("schema_version", SCHEMA_VERSION)
-        if found > SCHEMA_VERSION:
-            raise ValueError(
-                f"{path.name} declares schema_version {found}, but this "
-                f"version of grader_helper understands {SCHEMA_VERSION}. "
-                "Upgrade grader_helper."
-            )
-
-        # [[assessment]] reads better in the file than a plural key.
-        if "assessment" in data and "assessments" not in data:
-            data["assessments"] = data.pop("assessment")
-
-        # Fold [status.<id>] back onto its assessment.
-        status = data.pop("status", {}) or {}
-        for assessment in data.get("assessments", []):
-            recorded = status.get(assessment.get("id"))
-            if recorded:
-                assessment["status"] = recorded
-
-        # The module block is flattened into the model.
-        module_block = data.pop("module", {})
-        data = {**module_block, **data}
-        data["root"] = path.parent
-
-        return cls(path, document, Module.model_validate(data))
+        return cls(path, document, _to_module(document, path))
 
     # -------------------------------------------------------------- saving
 
@@ -156,6 +131,43 @@ class ModuleFile:
 def load_module(path: pl.Path) -> Module:
     """Load just the model, for read-only use."""
     return ModuleFile.load(path).module
+
+
+def _to_module(document: tomlkit.TOMLDocument, path: pl.Path) -> Module:
+    """Validate a parsed document into a Module.
+
+    Shared by :meth:`ModuleFile.load` and :func:`init_module`, so a file this
+    package writes is validated by exactly the path that reads it back. A
+    starter file that would not load is a bug worth catching before it
+    reaches the disk, not after.
+    """
+    data = _plain(document)
+
+    found = data.get("schema_version", SCHEMA_VERSION)
+    if found > SCHEMA_VERSION:
+        raise ValueError(
+            f"{path.name} declares schema_version {found}, but this "
+            f"version of grader_helper understands {SCHEMA_VERSION}. "
+            "Upgrade grader_helper."
+        )
+
+    # [[assessment]] reads better in the file than a plural key.
+    if "assessment" in data and "assessments" not in data:
+        data["assessments"] = data.pop("assessment")
+
+    # Fold [status.<id>] back onto its assessment.
+    status = data.pop("status", {}) or {}
+    for assessment in data.get("assessments", []):
+        recorded = status.get(assessment.get("id"))
+        if recorded:
+            assessment["status"] = recorded
+
+    # The module block is flattened into the model.
+    module_block = data.pop("module", {})
+    data = {**module_block, **data}
+    data["root"] = path.parent
+
+    return Module.model_validate(data)
 
 
 # --------------------------------------------------------------------------
@@ -250,3 +262,194 @@ def _atomic_write(path: pl.Path, text: str) -> None:
     except BaseException:
         pl.Path(tmp_name).unlink(missing_ok=True)
         raise
+
+
+# --------------------------------------------------------------------------
+# creating a starter file
+# --------------------------------------------------------------------------
+#
+# The file is meant to be hand-edited, so what init_module writes is a
+# *commented* file, not a minimal one. The comments carry the two rules a
+# reader cannot infer from the keys -- that weights must sum to 100, and
+# that an assessment's two numbers decide its grade-sheet columns -- and
+# grader_helper preserves them across every later save.
+
+
+#: A default shape that demonstrates both cases: two courseworks marked out
+#: of 100 and worth less, so each gets a raw and a weighted column, and an
+#: MCQ marked on its own contribution, which needs only one. Weights sum to
+#: 100, so the starter file loads without being edited first.
+STARTER_ASSESSMENTS: tuple[dict, ...] = (
+    dict(id="cw1", type="coursework", name="Coursework 1", marks_out_of=100, weight=40),
+    dict(id="cw2", type="coursework", name="Coursework 2", marks_out_of=100, weight=50),
+    dict(id="mcq", type="mcq", name="MCQ", marks_out_of=10, weight=10),
+)
+
+_HEADER = """\
+schema_version = {schema_version}
+
+# ---------------------------------------------------------------------------
+# {code} -- {name}
+#
+# Edit this by hand. grader_helper preserves your comments and layout, and
+# only ever appends to its own [status] section at the end of the file.
+#
+# Paths are relative to this file, whose directory is the module root.
+# Nothing absolute is stored, because these live under OneDrive where the
+# absolute path differs between machines.
+# ---------------------------------------------------------------------------
+
+[module]
+code = {code_v}
+name = {name_v}
+year = {year_v}
+"""
+
+_ASSESSMENT_PREAMBLE = """
+# ---------------------------------------------------------------------------
+# Assessment
+#
+# Each piece carries two numbers, and every grade-sheet column falls out of
+# them:
+#
+#   marks_out_of  what the piece is marked on -- what a grader writes on the
+#                 feedback sheet, and what the student is told they scored
+#   weight        what it contributes to the module total, out of 100
+#
+# Where they differ you get two columns, raw and weighted; where they are
+# equal there is nothing to weight, so there is one:
+#
+#   Coursework 1, out of 100, worth 40  ->  "Coursework 1 (100)"
+#                                           "Coursework 1 (40)"
+#   MCQ, out of 10, worth 10            ->  "MCQ (10)"
+#
+# Ten weekly quizzes, each pass worth 1%, are ONE assessment marked out of 10
+# and worth 10 -- the quiz count and the marks available are the same number.
+#
+# The weights must sum to 100. That is checked every time the file loads,
+# because weights that do not sum to 100 make every student's total wrong and
+# the error is invisible until the marks are audited.
+# ---------------------------------------------------------------------------
+"""
+
+
+def _toml_value(value) -> str:
+    """Render a Python value as TOML, quoting and escaping properly."""
+    return tomlkit.item(value).as_string()
+
+
+def _render_assessment(spec: dict) -> str:
+    """One [[assessment]] block, keys in a readable order."""
+    ordered = [
+        "id", "type", "name", "marks_out_of", "weight",
+        "folder", "rubric", "grade_cell", "graders", "group", "due_date",
+    ]
+    lines = ["", "[[assessment]]"]
+    for key in ordered:
+        if key in spec and spec[key] is not None:
+            lines.append(f"{key} = {_toml_value(spec[key])}")
+    # Anything the caller passed that is not in the canonical order still
+    # gets written, rather than being silently dropped.
+    for key, value in spec.items():
+        if key not in ordered and value is not None:
+            lines.append(f"{key} = {_toml_value(value)}")
+    return "\n".join(lines) + "\n"
+
+
+def init_module(
+    path: pl.Path,
+    code: str,
+    name: str,
+    year: str,
+    leader: "str | dict | Person",
+    assessments: "list[dict] | None" = None,
+    internal_moderator: "str | dict | Person | None" = None,
+    paths: "dict | None" = None,
+    overwrite: bool = False,
+) -> ModuleFile:
+    """
+    Write a starter ``module.toml``, with its explanatory comments in place.
+
+    Args:
+    path (pl.Path): The module root, or the file itself. A directory gets
+        ``module.toml`` written inside it.
+    code (str): Module code, e.g. "PS4001".
+    name (str): Module title.
+    year (str): Academic year, e.g. "2025/26".
+    leader: The module leader -- initials, or a mapping with more detail.
+    assessments (list[dict] | None): The module's assessment. Defaults to a
+        worked example whose weights already sum to 100, so the file loads
+        before it is edited.
+    internal_moderator: Optional, same forms as ``leader``.
+    paths (dict | None): Overrides for the ``[paths]`` block.
+    overwrite (bool): Whether to replace an existing file. Defaults to False.
+
+    Returns:
+    ModuleFile: The file, its parsed document and its validated model.
+
+    Raises:
+    FileExistsError: If a module file is already there and ``overwrite`` is
+        False. That file is the module's memory; clobbering it is not
+        something to do by accident.
+    ValueError: If the result would not be a valid module -- most often
+        weights that do not sum to 100.
+
+    Example:
+        >>> init_module(pl.Path("PS4001"), "PS4001", "Research Methods", "2025/26", "KOM")
+    """
+    path = pl.Path(path)
+    if path.is_dir() or not path.suffix:
+        path = path / MODULE_FILENAME
+
+    if path.exists() and not overwrite:
+        raise FileExistsError(
+            f"{path} already exists. That file is the module's memory -- its "
+            "assessment, its graders and everything grader_helper has "
+            "recorded about progress -- so it is not replaced by accident. "
+            "Pass overwrite=True if you really mean to start again."
+        )
+
+    specs = [dict(spec) for spec in (assessments or STARTER_ASSESSMENTS)]
+
+    text = _HEADER.format(
+        schema_version=SCHEMA_VERSION,
+        code=code,
+        name=name,
+        code_v=_toml_value(code),
+        name_v=_toml_value(name),
+        year_v=_toml_value(year),
+    )
+
+    # A person is written as a sub-table when there is detail to carry, and
+    # as bare initials when there is not -- the same shorthand the reader
+    # accepts, so a hand-written file and a generated one look alike.
+    for key, person in (("leader", leader), ("internal_moderator", internal_moderator)):
+        if person is None:
+            continue
+        person = as_person(person)
+        rendered = person.model_dump()
+        if isinstance(rendered, str):
+            text += f"{key} = {_toml_value(rendered)}\n"
+        else:
+            text += f"\n[module.{key}]\n"
+            for field, value in rendered.items():
+                text += f"{field} = {_toml_value(value)}\n"
+
+    path_block = {"assessments": "assessments", **(paths or {})}
+    text += "\n[paths]\n"
+    for key, value in path_block.items():
+        if value is not None:
+            text += f"{key} = {_toml_value(value)}\n"
+
+    text += _ASSESSMENT_PREAMBLE
+    for spec in specs:
+        text += _render_assessment(spec)
+
+    # Validate before writing, through the same path that reads a file back.
+    # A starter file that would not load is worth catching here rather than
+    # leaving on disk for the author to puzzle over.
+    document = tomlkit.parse(text)
+    module = _to_module(document, path)
+
+    _atomic_write(path, text)
+    return ModuleFile(path, document, module)

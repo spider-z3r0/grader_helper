@@ -14,6 +14,7 @@ from .models import (
     ModuleFile,
     ModulePaths,
     Person,
+    init_module,
     load_module,
 )
 
@@ -59,6 +60,7 @@ __all__ = [
     "ModuleFile",
     "ModulePaths",
     "Person",
+    "init_module",
     "load_module",
     "load_graders",
     "distribute_feedback_sheets",

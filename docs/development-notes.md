@@ -179,7 +179,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 199 tests:
+Done, 218 tests:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -192,6 +192,7 @@ Done, 199 tests:
 - `Person` / `Assessment` / `Module` models and `module.toml` round-tripping
 - The four grade-sheet functions read from `Module` instead of regexing
   column names — see below
+- `init_module` writes a starter `module.toml`, comments and all
 
 ### The rewire onto `Module`
 
@@ -235,16 +236,39 @@ every letter grade and the column layout against what Excel computed. All
 three defects above were re-introduced one at a time and watched to fail
 before the change was committed.
 
+### `init_module`
+
+Writes a starter `module.toml` whose comments carry what the keys cannot:
+the two-numbers rule, the worked example of when an assessment gets two
+columns and when it gets one, and the fact that weights must sum to 100.
+`models/module_file.py` had told users to "Run init_module() to create one"
+since the models landed; the promise is now kept.
+
+Two things it refuses, both deliberate:
+
+- **It will not replace an existing file.** That file is the module's
+  memory — assessment, graders, and everything recorded about progress — so
+  overwriting it takes an explicit `overwrite=True`.
+- **It validates before writing.** The text is parsed and run through the
+  same `_to_module` path that reads a file back, so a starter file that
+  would not load never reaches the disk. Weights that do not sum to 100
+  raise, and the directory is left empty.
+
+The default shape is the departmental one — cw1 (100/40), cw2 (100/50), MCQ
+(10/10) — chosen because it sums to 100, so the file loads before it is
+edited, and because it shows both the two-column and one-column cases in a
+file the author is already reading.
+
+Validation was extracted out of `ModuleFile.load` into `_to_module` so both
+the reader and the writer use it. A file this package writes is therefore
+checked by exactly the path that reads it back.
+
 ### Next
 
-1. **`init_module`** — write a starter `module.toml` with the explanatory
-   comments in place. Note `models/module_file.py` already tells users to
-   "Run init_module() to create one", and a test asserts that message, so
-   the promise is made and unkept.
-2. **Quiz collection** — Kev has separate code for this
-3. **Polars migration** — only once the above are correct; see
+1. **Quiz collection** — Kev has separate code for this
+2. **Polars migration** — only once the above are correct; see
    **The aim → Sequencing** for what it is gated on
-4. **Marimo dashboard** — the non-technical-colleague story, built strictly
+3. **Marimo dashboard** — the non-technical-colleague story, built strictly
    on top of the library
 
 ### Untested, and needing care
