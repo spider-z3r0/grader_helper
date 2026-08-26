@@ -19,6 +19,8 @@ dependencies = [
     # Provides pythoncom, which xlwings needs for COM. Windows only, and
     # previously an undeclared implicit dependency.
     "pywin32>=306; platform_system == 'Windows'",
+    "pydantic>=2.13.4",
+    "tomlkit>=0.13.3",
 ]
 requires-python = ">=3.13"
 

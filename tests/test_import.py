@@ -99,3 +99,58 @@ def test_repo_root_does_not_shadow_the_package(repo_root):
         "importing grader_helper with the repo's parent on sys.path failed:\n"
         + result.stderr
     )
+
+
+# Import name -> distribution name, where they differ.
+IMPORT_TO_DISTRIBUTION = {
+    "pythoncom": "pywin32",
+    "win32com": "pywin32",
+    "calamine": "python-calamine",
+    "dateutil": "python-dateutil",
+    "yaml": "pyyaml",
+}
+
+
+def test_every_imported_package_is_declared(repo_root):
+    """Third-party imports must appear in [project.dependencies].
+
+    The mirror of the dev-only guard above, and the one that catches the
+    more embarrassing failure: code that imports a package which happens to
+    be installed locally but is not declared, so it works here and breaks
+    on a clean install. matplotlib was that bug in one direction; pydantic
+    was very nearly that bug in the other.
+    """
+    import sys
+    import tomllib
+
+    from packaging.requirements import Requirement
+
+    with open(repo_root / "pyproject.toml", "rb") as f:
+        pyproject = tomllib.load(f)
+
+    declared = {
+        Requirement(r).name.lower().replace("_", "-")
+        for r in pyproject["project"]["dependencies"]
+    }
+
+    first_party = {"grader_helper"}
+    stdlib = set(sys.stdlib_module_names)
+
+    undeclared = {}
+    for path in sorted((repo_root / "grader_helper").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for name, lineno in _imported_names(tree):
+            if name in stdlib or name in first_party or name.startswith("_"):
+                continue
+            distribution = IMPORT_TO_DISTRIBUTION.get(name, name)
+            distribution = distribution.lower().replace("_", "-")
+            if distribution not in declared:
+                undeclared.setdefault(
+                    distribution, f"{path.relative_to(repo_root)}:{lineno}"
+                )
+
+    assert not undeclared, (
+        "imported but not declared in [project.dependencies]:\n"
+        + "\n".join(f"  {dist}  (first seen at {where})"
+                    for dist, where in sorted(undeclared.items()))
+    )
