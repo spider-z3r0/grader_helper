@@ -3,6 +3,67 @@
 Decisions, hard-won facts, and where the work stands. Written for whoever
 picks this up next — including future me.
 
+## The aim
+
+**Mature this into a library on polars, and a marimo dashboard on top of it.
+The library is for technical users; the dashboard is for everyone else.**
+
+Two audiences, one codebase:
+
+- **The library** — importable, scriptable, for colleagues who are happy in
+  Python. This is what has to be correct, because the app inherits whatever
+  it gets wrong.
+- **The dashboard** — a marimo app for colleagues who should never have to
+  see a line of code. `marimo run` serves a notebook as an app with the code
+  hidden, which is the whole reason marimo is the choice: one artefact is
+  both the development surface and the delivered tool.
+
+Library first, always. The dashboard is a view onto the library, never a
+place where logic lives — anything the app can do, a script must be able to
+do too.
+
+### Platforms
+
+**Windows is first-class. macOS is supported wherever that costs Windows
+nothing, and is dropped the moment it would.** Linux is not a target, though
+the pure-logic tests run there, which is what makes CI and container work
+possible.
+
+That rule is a tie-breaker, not a grudge: where a single approach serves
+both, use it. `xlwings` is the case in point — it drives Excel via COM on
+Windows and AppleScript on macOS, so gating it on Windows alone was a
+defect, not a simplification.
+
+### Sequencing
+
+Correctness, then polars, then the app. The migration waits on the
+Excel-writing functions being covered by tests (see **Untested, and needing
+care**) — porting code whose behaviour nothing pins down is how silent
+breakage gets in.
+
+Two practical notes for whoever starts the migration:
+
+- **polars is not declared in `pyproject.toml` yet.** The packaging guard
+  refuses an import the package does not declare, so `pr` will fail the
+  suite until it is added to `dependencies`. That guard is working as
+  intended; add the dependency, do not weaken the test.
+- **marimo is a dev dependency.** It stays that way while the app is
+  developed. Shipping the dashboard to end users means promoting it to a
+  runtime dependency, probably behind an optional extra so library users do
+  not pull in an app framework they will never launch.
+
+## Branches
+
+**`develop` is the one long-lived branch.** Work goes there; it merges into
+`main` when a chunk is finished and green. `models` is a parked archive from
+August 2025 — the earlier YAML/src-layout attempt, superseded by the
+pydantic and `module.toml` models — kept for reference, not for building on.
+
+Claude Code sessions are assigned a fresh `claude/<slug>` branch by default,
+which is how five branches accumulated. **Tell each new session to work on
+`develop` and not create its own.** Consolidating afterwards is avoidable
+work.
+
 ## Conventions
 
 ```python
@@ -12,10 +73,6 @@ import polars as pr         # pr is polars (not yet in use)
 
 House convention, non-negotiable. Note it inverts the usual polars idiom, so
 public docstrings should show the import line.
-
-**Supported platforms: Windows first-class, macOS second. Linux is not a
-target** — though the pure-logic tests run there, which is what makes CI and
-container work possible.
 
 ## Sources of truth
 
@@ -185,9 +242,10 @@ before the change was committed.
    "Run init_module() to create one", and a test asserts that message, so
    the promise is made and unkept.
 2. **Quiz collection** — Kev has separate code for this
-3. **Polars migration** — only once the above are correct
-4. **Marimo dashboard** — library-first; `marimo run` gives a code-free app
-   view, which is the non-technical-colleague story
+3. **Polars migration** — only once the above are correct; see
+   **The aim → Sequencing** for what it is gated on
+4. **Marimo dashboard** — the non-technical-colleague story, built strictly
+   on top of the library
 
 ### Untested, and needing care
 
