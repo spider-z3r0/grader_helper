@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 from ..dependencies import pd
+from .rounding import excel_round_series
 
 
 def calculate_total_module_score(df: pd.DataFrame) -> None | str:
@@ -33,14 +34,16 @@ def calculate_total_module_score(df: pd.DataFrame) -> None | str:
         return "DataFrame is missing a coursework column"
 
     # Calculate the total module score
+    # The departmental sheet rounds here and only here:
+    # H = ROUND(SUM(D, F, G), 0), with the weighted components left exact.
     if len(coursework_columns) == 1:
-        df["Total % Grade"] = df[coursework_columns[0]]
+        df["Total % Grade"] = excel_round_series(df[coursework_columns[0]])
     else:
         try:
             weighted_cols = [
                 col for col in df.columns if "Coursework" in col and "100" not in col
             ]
-            df["Total % Grade"] = df[weighted_cols].sum(axis=1)
+            df["Total % Grade"] = excel_round_series(df[weighted_cols].sum(axis=1))
         except KeyError:
             return (
                 "It looks like there is something wrong with the column names in the DataFrame. "

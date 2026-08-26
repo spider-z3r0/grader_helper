@@ -16,6 +16,7 @@ from .assignment.assign_graders_groups import assign_graders_groups
 from .assignment.find_unsubmitted import find_unsubmitted
 
 # dataframe operations
+from .dataframe_operations.rounding import excel_round, excel_round_series
 from .dataframe_operations.make_letter_grade import make_letter_grade
 from .dataframe_operations.calculate_weighted_score import calculate_weighted_score
 from .dataframe_operations.calculate_total_module_score import (
@@ -51,6 +52,8 @@ __all__ = [
     "ingest_completed_graderfiles",
     "extract_studentid_grade",
     "catch_grades",
+    "excel_round",
+    "excel_round_series",
     "make_letter_grade",
     "calculate_weighted_score",
     "calculate_total_module_score",

@@ -91,7 +91,17 @@ def calculate_weighted_score(
                 "whole module needs no weighting; calculate_total_module_score "
                 "handles that case directly."
             )
-        df[new_col] = (df[col_name] * weight).round()
+        # Deliberately NOT rounded. The departmental sheet stores the
+        # weighted component unrounded (GradeTemplate D30 = C30/100*40 gives
+        # 29.6) and rounds only the total, ROUND(SUM(D,F,G),0). Rounding
+        # each component instead shifts the total and can change the letter
+        # grade at a band boundary -- it disagrees with the sheet on 4 of
+        # its own 20 sample rows, two of which cross a boundary.
+        #
+        # It also keeps the student's reported mark and the audited mark in
+        # step: a student told they scored 66.5 has 66.5 carried into the
+        # grade sheet, not 67.
+        df[new_col] = df[col_name] * weight
         return None
     # If the column does not exist in the DataFrame, print an error message and return the error
     except KeyError as e:
