@@ -168,7 +168,7 @@ ENV/
 
 
 # Tests
-tests/
+# NB: tests/ is tracked -- the suite is part of the project.
 scratch.*
 
 # Jupyter Notebook
