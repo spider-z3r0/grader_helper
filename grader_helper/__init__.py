@@ -5,6 +5,18 @@
 """ This is the init file the folder that contains all the sub-modules. But it's not the top-level init file."""
 
 
+# models
+from .models import (
+    Assessment,
+    AssessmentStatus,
+    AssessmentType,
+    Module,
+    ModuleFile,
+    ModulePaths,
+    Person,
+    load_module,
+)
+
 # ingesting
 from .ingesting.load_graders import load_graders
 from .ingesting.import_brightspace_classlist import import_brightspace_classlist
@@ -40,6 +52,14 @@ from .file_operations.brightspace_name_folders import brightspace_name_folders
 from .file_operations.scan_multiple_submissions import make_sub_date, scan_multiple_subs
 
 __all__ = [
+    "Assessment",
+    "AssessmentStatus",
+    "AssessmentType",
+    "Module",
+    "ModuleFile",
+    "ModulePaths",
+    "Person",
+    "load_module",
     "load_graders",
     "distribute_feedback_sheets",
     "distribute_feedback_sheets_groups",
