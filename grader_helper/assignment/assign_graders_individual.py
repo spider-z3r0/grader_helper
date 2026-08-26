@@ -70,7 +70,6 @@ def assign_graders_individual(
 
     # --- determine quotas (counts per grader) ---
     k = len(graders)
-    print(graders)
 
     if weights is None:
         # Uniform quotas via divmod (exactly even)

@@ -116,20 +116,8 @@ def test_graders_must_be_a_list_not_any_sequence(students):
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason=(
-        "assign_graders_groups reads d.index.get_level_values(0), i.e. it "
-        "requires a MultiIndex keyed on group. Nothing in the package "
-        "produces one -- import_brightspace_classlist(group=True) returns a "
-        "flat frame with a Group COLUMN. On a flat frame the RangeIndex "
-        "makes every row its own group, so members of one team are split "
-        "across different graders and the group's single piece of work gets "
-        "marked by more than one person. Phase 3 must rebuild this around "
-        "the Group column, since polars has no index."
-    ),
-    strict=True,
-)
 def test_every_member_of_a_group_gets_the_same_grader(group_classlist):
+    """The whole point: a group's single piece of work gets one marker."""
     out = assign_graders_groups(group_classlist, GRADERS)
     per_group = out.groupby("Group")["grader"].nunique()
     assert (per_group == 1).all(), (
@@ -137,23 +125,59 @@ def test_every_member_of_a_group_gets_the_same_grader(group_classlist):
     )
 
 
-def test_group_allocation_currently_assigns_per_student(group_classlist):
-    """Characterisation of the bug above, so the fix is visibly a change."""
+def test_every_student_keeps_their_row(group_classlist):
     out = assign_graders_groups(group_classlist, GRADERS)
-    # It does produce a grader for every row -- it just ignores Group.
+    assert len(out) == len(group_classlist)
     assert out["grader"].notna().all()
-    assert "Group" in out.columns
+    assert set(out["grader"]) <= set(GRADERS)
 
 
-def test_group_allocation_works_on_the_multiindex_it_expects():
-    """The function is correct for the shape it was written against."""
-    index = pd.MultiIndex.from_tuples(
-        [("Team 1", "1"), ("Team 1", "2"), ("Team 2", "3"), ("Team 2", "4")],
-        names=["Group", "Student"],
+def test_groups_are_spread_evenly_across_graders():
+    """Six groups across three graders is 2/2/2, not 4/1/1.
+
+    The old implementation sampled with replacement, so a grader could be
+    given every group while another got none.
+    """
+    df = pd.DataFrame(
+        {
+            "Student ID": [str(i) for i in range(12)],
+            "Group": [f"Team {i % 6 + 1}" for i in range(12)],
+        }
     )
-    df = pd.DataFrame({"Score": [0, 0, 0, 0]}, index=index)
 
-    out = assign_graders_groups(df, GRADERS)
+    out = assign_graders_groups(df, GRADERS, seed=3)
 
-    per_group = out.groupby(level=0)["grader"].nunique()
+    groups_per_grader = out.drop_duplicates("Group")["grader"].value_counts()
+    assert sorted(groups_per_grader.tolist()) == [2, 2, 2]
+
+
+def test_group_allocation_is_reproducible_with_a_seed(group_classlist):
+    a = assign_graders_groups(group_classlist, GRADERS, seed=11)
+    b = assign_graders_groups(group_classlist, GRADERS, seed=11)
+    pd.testing.assert_series_equal(a["grader"], b["grader"])
+
+
+def test_group_column_is_found_however_it_is_named():
+    df = pd.DataFrame(
+        {"Student ID": list("1234"), "Team": ["A", "A", "B", "B"]}
+    )
+
+    out = assign_graders_groups(df, GRADERS, seed=1)
+
+    per_group = out.groupby("Team")["grader"].nunique()
     assert (per_group == 1).all()
+
+
+def test_a_frame_with_no_group_column_says_so():
+    """A MultiIndex is no longer supported; the group lives in a column."""
+    df = pd.DataFrame({"Student ID": list("12"), "Score": [0, 0]})
+
+    with pytest.raises(ValueError, match="group column"):
+        assign_graders_groups(df, GRADERS)
+
+
+def test_existing_allocation_is_not_reshuffled(group_classlist):
+    """Re-running must not move work graders may already have started."""
+    first = assign_graders_groups(group_classlist, GRADERS, seed=1)
+    second = assign_graders_groups(first, GRADERS, seed=999)
+    pd.testing.assert_series_equal(first["grader"], second["grader"])

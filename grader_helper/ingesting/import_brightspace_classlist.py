@@ -168,7 +168,6 @@ def import_brightspace_classlist(
         The Brightspace classlist.
     """
     # Check if the file is a CSV file
-    print('Testing the ingestion')
     try:
         match file.suffix:
             case '.csv':

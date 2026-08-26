@@ -2,85 +2,113 @@
 # -*- coding: utf-8 -*-
 
 
-from ..dependencies import pd, np
+from typing import Mapping, Sequence
+
+from ..dependencies import pd
+from ..ingesting.import_brightspace_classlist import find_group_column
+from .assign_graders_individual import assign_graders_individual
 
 
 def main():
     # Example usage
-    # Create a MultiIndex DataFrame with group information
-    index = pd.MultiIndex.from_tuples(
-        [
-            ("Group1", "Student1"),
-            ("Group1", "Student2"),
-            ("Group2", "Student3"),
-            ("Group2", "Student4"),
-        ],
-        names=["Group", "Student"],
+    df = pd.DataFrame(
+        {
+            "Student ID": list("123456"),
+            "Group": ["Team 1"] * 3 + ["Team 2"] * 3,
+        }
     )
-    data = {"Score": [90, 85, 88, 92]}
-    df = pd.DataFrame(data, index=index)
 
-    # List of graders
     graders = ["Grader1", "Grader2", "Grader3"]
 
-    # Call the function
-    updated_df = assign_graders_groups(
-        df, graders, assigned_grader_col="AssignedGrader"
-    )
-
-    # Print the updated DataFrame
-    print(updated_df)
+    print(assign_graders_groups(df, graders, seed=1))
 
 
 def assign_graders_groups(
-    d: pd.DataFrame, l: list, assigned_grader_col: str = "grader"
+    d: pd.DataFrame,
+    l: Sequence[str],
+    assigned_grader_col: str = "grader",
+    group_col: str | None = None,
+    *,
+    weights: Mapping[str, float] | None = None,
+    overwrite: bool = False,
+    seed: int | None = None,
 ) -> pd.DataFrame:
     """
-    Assigns a single grader to each group in a MultiIndex DataFrame.
+    Assign one grader to each group, so a group's work is marked by one person.
+
+    The group is read from a **column**, not from a MultiIndex. Nothing in
+    the package ever produced a MultiIndex -- ``import_brightspace_classlist(
+    group=True)`` returns a flat frame with a 'Group' column -- so the old
+    MultiIndex form silently degraded to per-student allocation and split
+    teams across graders. Polars has no index either, so a column is the
+    durable choice.
+
+    Allocation is delegated to :func:`assign_graders_individual` over the
+    *unique groups*, which gives an even split of groups across graders
+    (rather than sampling with replacement, which could leave one grader
+    with everything and another with nothing), plus optional weights and a
+    seed for reproducibility.
 
     Parameters
     ----------
     d : pandas DataFrame
-        A MultiIndex DataFrame containing a column named 'Group', where the first level of the MultiIndex corresponds to the group IDs.
-    l : list
-        A list of grader IDs.
+        One row per student, with a column naming each student's group.
+    l : sequence of str
+        Grader IDs.
     assigned_grader_col : str, optional
-        The name of the column where the assigned grader IDs will be stored (default is 'grader').
+        Column to write the allocation into (default 'grader').
+    group_col : str, optional
+        The column holding the group. Found automatically when not given --
+        see ``find_group_column``.
+    weights : mapping, optional
+        Optional {grader: weight}, applied to the share of *groups*.
+    overwrite : bool, optional
+        If False (default) and ``assigned_grader_col`` already exists, the
+        frame is returned unchanged, so a re-run cannot reshuffle an
+        allocation graders have already started working to.
+    seed : int, optional
+        Seed for reproducible allocation.
 
     Returns
     -------
     pandas DataFrame
-        The input DataFrame with an additional column containing the assigned grader IDs.
+        A copy of ``d`` with the grader column filled.
+
+    Raises
+    ------
+    TypeError
+        If ``d`` is not a DataFrame.
+    ValueError
+        If ``l`` is empty, or no group column can be found.
     """
-    try:
-        # Input validation
-        if not isinstance(d, pd.DataFrame):
-            raise ValueError("Argument 'd' must be a pandas DataFrame.")
-        if not isinstance(l, list) or len(l) == 0:
-            raise ValueError("Argument 'l' must be a non-empty list of grader IDs.")
-        if assigned_grader_col in d.columns:
-            raise ValueError(
-                f"Column '{assigned_grader_col}' already exists in the DataFrame."
-            )
+    if not isinstance(d, pd.DataFrame):
+        raise TypeError("Argument 'd' must be a pandas DataFrame.")
+    if len(list(l)) == 0:
+        raise ValueError("Argument 'l' must be a non-empty sequence of grader IDs.")
 
-        # Create a dictionary mapping each group to a random grader
-        group_grader_map = dict(
-            zip(
-                d.index.get_level_values(0).unique(),
-                np.random.choice(
-                    l, len(d.index.get_level_values(0).unique()), replace=True
-                ),
-            )
-        )
+    if assigned_grader_col in d.columns and not overwrite:
+        return d.copy()
 
-        # Assign the randomly chosen grader to each group
-        d[assigned_grader_col] = d.index.get_level_values(0).map(group_grader_map)
+    # Raises ValueError naming the columns present if there is no group column.
+    col = find_group_column(d.columns, group_col)
 
-        return d
+    # Allocate over the distinct groups, then map back onto the students.
+    groups = pd.DataFrame({col: sorted(d[col].dropna().unique().tolist())})
+    allocated = assign_graders_individual(
+        groups,
+        list(l),
+        weights=weights,
+        column=assigned_grader_col,
+        overwrite=True,
+        seed=seed,
+    )
+    group_grader_map = dict(
+        zip(allocated[col], allocated[assigned_grader_col])
+    )
 
-    except ValueError as ve:
-        print(f"Input error: {ve}")
-        return None
+    out = d.copy()
+    out[assigned_grader_col] = out[col].map(group_grader_map)
+    return out
 
 
 if __name__ == "__main__":
