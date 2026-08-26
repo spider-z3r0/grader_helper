@@ -21,9 +21,47 @@ def make_sub_date(s: str, fmt="%d %B %Y %I:%M %p") -> dt.datetime:
     
 
 
-def scan_multiple_subs(folder: pl.Path) -> dict[str,dt.datetime]:
+def parse_brightspace_folder(name: str) -> tuple[str, dt.datetime] | None:
+    """Parse a Brightspace submission folder name.
 
-    """scan folder for multiple submissions by the same person
+    The download format is::
+
+        "27236-46025 - 23304308 Angood - 05 March 2026 612 PM"
+         |             |        |        |
+         |             |        |        submission timestamp
+         |             |        surname
+         |             student ID
+         Brightspace's own id, which changes per assignment
+
+    Returns ``(student_id, submitted_at)``, or ``None`` if ``name`` is not a
+    Brightspace folder at all. Returning None rather than raising is what
+    lets callers run over a folder that has already been through
+    ``alphabetise_folders`` -- those folders are in UL format
+    ("ANGOOD, KEVIN(23304308)") and have no " - " to split on -- as well as
+    over incidental directories such as ``__MACOSX``, which macOS creates
+    when unzipping, or a moderation folder the user has added.
+    """
+    parts = name.strip().split(" - ")
+    if len(parts) < 3:
+        return None
+
+    student_id = parts[1].split(" ")[0]
+    if not student_id.isdigit():
+        return None
+
+    try:
+        submitted_at = make_sub_date(parts[-1])
+    except ValueError:
+        return None
+
+    return student_id, submitted_at
+
+
+def scan_multiple_subs(folder: pl.Path) -> dict[str, list[dt.datetime]]:
+    """Find students who submitted more than once.
+
+    Only folders still in Brightspace format are considered; anything else
+    is skipped. Keys are student IDs, values the submission timestamps.
     """
     if not folder.is_dir():
         raise RuntimeError(
@@ -32,23 +70,18 @@ def scan_multiple_subs(folder: pl.Path) -> dict[str,dt.datetime]:
                 "which contains the student submissions"
         )
 
-    f_names = [
-        (f.name.strip().split(' - ')[1], make_sub_date(f.name.strip().split(' - ')[-1])) for f in folder.iterdir() if f.is_dir()
-            ]
+    temp_dict: dict[str, list[dt.datetime]] = {}
 
-    temp_dict = {}
+    for f in folder.iterdir():
+        if not f.is_dir():
+            continue
+        parsed = parse_brightspace_folder(f.name)
+        if parsed is None:
+            continue
+        student_id, submitted_at = parsed
+        temp_dict.setdefault(student_id, []).append(submitted_at)
 
-
-    for (id, date) in f_names:
-        if id in temp_dict.keys():
-            temp_dict[id].append(date)
-        else:
-            temp_dict[id] = [date]
-    
-    duplicates = {k:v for (k,v) in temp_dict.items() if len(v) > 1}
-
-
-    return duplicates
+    return {k: v for (k, v) in temp_dict.items() if len(v) > 1}
 
 
 
