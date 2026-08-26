@@ -19,6 +19,7 @@ import pandas as pd
 import pytest
 
 from grader_helper import import_brightspace_classlist, load_graders
+from grader_helper.ingesting.import_brightspace_classlist import MissingGroupError
 
 RAW_COLUMNS = [
     "OrgDefinedId",
@@ -192,3 +193,122 @@ def test_missing_group_column_reports_what_it_looked_for(
     # The message must name the columns that ARE present, so the user can see
     # what to rename.
     assert "Last Name" in message
+
+
+# ---------------------------------------------------------------------------
+# Students with no group
+# ---------------------------------------------------------------------------
+#
+# A blank group is almost always an oversight -- a student who joined late,
+# or a row the module leader missed. It must be raised loudly so it can be
+# resolved, never quietly carried forward, because a NaN group silently
+# becomes its own group at allocation and the student's work is marked
+# outside their team.
+#
+# A student legitimately working alone is recorded with the SOLO sentinel.
+
+
+def _classlist_with_groups(classlist_file, tmp_path, groups, name="groups.xlsx"):
+    """Write a class list whose first len(groups) rows carry those groups."""
+    df = pd.read_excel(classlist_file).head(len(groups)).copy()
+    df["Group Name"] = groups
+    out = tmp_path / name
+    df.to_excel(out, index=False)
+    return out
+
+
+def test_blank_group_raises_and_names_the_student(classlist_file, tmp_path):
+    path = _classlist_with_groups(
+        classlist_file, tmp_path, ["Team 1", None, "Team 2"]
+    )
+
+    with pytest.raises(MissingGroupError) as excinfo:
+        import_brightspace_classlist(path, group=True)
+
+    message = str(excinfo.value)
+    # The second row of the fixture is Alexander Miller, #57156377.
+    assert "57156377" in message
+    assert "Miller" in message
+
+
+@pytest.mark.parametrize("blank", ["", "   ", None])
+def test_all_the_ways_a_group_can_be_blank(classlist_file, tmp_path, blank):
+    path = _classlist_with_groups(classlist_file, tmp_path, ["Team 1", blank])
+    with pytest.raises(MissingGroupError):
+        import_brightspace_classlist(path, group=True)
+
+
+def test_every_affected_student_is_listed(classlist_file, tmp_path):
+    path = _classlist_with_groups(
+        classlist_file, tmp_path, ["Team 1", None, None, None]
+    )
+
+    with pytest.raises(MissingGroupError) as excinfo:
+        import_brightspace_classlist(path, group=True)
+
+    message = str(excinfo.value)
+    assert "3" in message  # the count
+    for sid in ("57156377", "59299972", "51420861"):
+        assert sid in message
+
+
+def test_the_error_explains_both_remedies(classlist_file, tmp_path):
+    path = _classlist_with_groups(classlist_file, tmp_path, ["Team 1", None])
+
+    with pytest.raises(MissingGroupError) as excinfo:
+        import_brightspace_classlist(path, group=True)
+
+    message = str(excinfo.value).lower()
+    assert "solo" in message
+
+
+@pytest.mark.parametrize("sentinel", ["SOLO", "solo", "Solo", "individual", "ALONE"])
+def test_solo_is_accepted_however_it_is_spelled(
+    classlist_file, tmp_path, sentinel
+):
+    path = _classlist_with_groups(
+        classlist_file, tmp_path, ["Team 1", sentinel, "Team 1"]
+    )
+
+    out = import_brightspace_classlist(path, group=True)
+
+    assert out is not None
+    assert out["Group"].notna().all()
+
+
+def test_each_solo_student_is_their_own_group(classlist_file, tmp_path):
+    """Otherwise every solo student is marked by the same grader.
+
+    assign_graders_groups gives one grader per distinct group value, so if
+    three solo students all carried the literal string "SOLO" they would be
+    treated as a single three-person team.
+    """
+    path = _classlist_with_groups(
+        classlist_file, tmp_path, ["Team 1", "SOLO", "SOLO", "SOLO"]
+    )
+
+    out = import_brightspace_classlist(path, group=True)
+
+    solo = out[out["Group"].str.upper().str.startswith("SOLO")]
+    assert len(solo) == 3
+    assert solo["Group"].nunique() == 3, (
+        f"solo students share a group: {solo['Group'].tolist()}"
+    )
+
+
+def test_solo_group_names_identify_the_student(classlist_file, tmp_path):
+    path = _classlist_with_groups(classlist_file, tmp_path, ["SOLO"])
+
+    out = import_brightspace_classlist(path, group=True)
+
+    assert "56170559" in out["Group"].iloc[0]
+
+
+def test_ordinary_groups_are_left_alone(classlist_file, tmp_path):
+    path = _classlist_with_groups(
+        classlist_file, tmp_path, ["Team 1", "Team 2", "Team 1"]
+    )
+
+    out = import_brightspace_classlist(path, group=True)
+
+    assert out["Group"].tolist() == ["Team 1", "Team 2", "Team 1"]

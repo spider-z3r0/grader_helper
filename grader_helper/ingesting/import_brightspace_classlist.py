@@ -28,8 +28,72 @@ GROUP_COLUMN_ALIASES = (
 )
 
 
+#: Values in the group column meaning "this student is working alone".
+#: Matched case-insensitively. Each such student becomes their own group --
+#: see _expand_solo_groups for why that matters.
+SOLO_ALIASES = ("solo", "individual", "alone", "on their own")
+
+#: Prefix given to the group of a student working alone.
+SOLO_PREFIX = "SOLO"
+
+
+class MissingGroupError(ValueError):
+    """Raised when a group class list has students with no group.
+
+    Deliberately its own type, and deliberately allowed to propagate rather
+    than being folded into the generic "could not import" path, because it
+    is a data problem the module leader must resolve before any marking can
+    be allocated -- not a malformed file.
+    """
+
+
 def _normalise_column(name: str) -> str:
     return str(name).strip().lower().replace(" ", "").replace("_", "")
+
+
+def _is_blank(value) -> bool:
+    return pd.isna(value) or not str(value).strip()
+
+
+def _check_for_missing_groups(df: pd.DataFrame) -> None:
+    """Raise if any student has no group, naming every one of them."""
+    blank = df[df["Group"].map(_is_blank)]
+    if blank.empty:
+        return
+
+    listed = [
+        f"  {row['Student ID']}  {row['First Name']} {row['Last Name']}"
+        for _, row in blank.head(20).iterrows()
+    ]
+    if len(blank) > 20:
+        listed.append(f"  ... and {len(blank) - 20} more")
+
+    raise MissingGroupError(
+        f"{len(blank)} student(s) in the class list have no group:\n"
+        + "\n".join(listed)
+        + "\n\nEvery student must be in a group before marking can be "
+        "allocated, because a student with no group is silently treated as a "
+        "group of one and their work is marked apart from their team.\n"
+        "Either enter the group number in the class list, or -- if the "
+        f"student really is working alone -- put '{SOLO_PREFIX}' in the group "
+        "column and they will be given a group of their own."
+    )
+
+
+def _expand_solo_groups(df: pd.DataFrame) -> pd.DataFrame:
+    """Give every student marked SOLO a group unique to them.
+
+    Grader allocation gives one grader per distinct group value, so leaving
+    every solo student on the literal string 'SOLO' would treat them as a
+    single team and send them all to the same grader. Appending the student
+    ID keeps the meaning ("this person worked alone") while making each one
+    genuinely their own group.
+    """
+    solo = df["Group"].astype(str).str.strip().str.lower().isin(SOLO_ALIASES)
+    df.loc[solo, "Group"] = [
+        f"{SOLO_PREFIX} ({sid})" for sid in df.loc[solo, "Student ID"]
+    ]
+    return df
 
 
 def find_group_column(columns, group_column: str | None = None) -> str:
@@ -138,6 +202,10 @@ def import_brightspace_classlist(
         classlist_df["Student ID"] = classlist_df["Student ID"].str.replace(
             "#", "")
 
+        if group:
+            _check_for_missing_groups(classlist_df)
+            classlist_df = _expand_solo_groups(classlist_df)
+
 
         if normalise:
             classlist_df.columns = [i.lower().replace(' ', '_')
@@ -146,6 +214,9 @@ def import_brightspace_classlist(
         # Return the processed classlist DataFrame
         return classlist_df
 
+    except MissingGroupError:
+        # A data problem for the module leader to fix, not an import failure.
+        raise
     except FileNotFoundError:
         print(f"Can not find file at {file.absolute()}")
         return None
