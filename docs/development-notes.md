@@ -122,7 +122,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, on `claude/repo-review-98isz0`, 191 tests:
+Done, 199 tests:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -133,25 +133,60 @@ Done, on `claude/repo-review-98isz0`, 191 tests:
 - `import_brightspace_classlist(group=True)` strips `#`; finds the group
   column however named; refuses a class list with ungrouped students
 - `Person` / `Assessment` / `Module` models and `module.toml` round-tripping
+- The four grade-sheet functions read from `Module` instead of regexing
+  column names — see below
+
+### The rewire onto `Module`
+
+The departmental file is unblocked. `sort_order_columns`,
+`check_for_weighted_columns`, `calculate_total_module_score` and
+`prepare_data_for_departmental_template` now take a `Module` and are *told*
+the sheet's shape. The `Module` argument is **required**: the inference path
+is gone rather than kept as a fallback, because it either crashed or produced
+wrong totals, and leaving it reachable would mean testing it forever.
+
+What that fixed:
+
+- `calculate_total_module_score` sums `weighted_column or raw_column` per
+  assessment. An MCQ out of 10 worth 10 has no weighted column, so its raw
+  mark *is* its contribution — which is exactly the component the old
+  `"Coursework"`-substring filter dropped. Row 30 of the sample data was
+  returning 63 (B3) where the sheet says 70 (B1).
+- `prepare_data_for_departmental_template` maps `make_letter_grade` over the
+  totals instead of calling it with the DataFrame. It previously raised
+  `ValueError("Score must be an integer or float.")` on every run — the main
+  entry point could not complete at all.
+- `sort_order_columns` builds the departmental order from
+  `module.grade_sheet_columns` and **never drops a column**: anything the
+  module does not describe is appended rather than discarded. The old version
+  lost 4 of the sheet's 10 columns.
+- `check_for_weighted_columns` is given the full column list and reports real
+  names (`Coursework 1 (40)`), not guesses (`Coursework 1`).
+
+Two things worth knowing:
+
+- **Ordering is now the author's declared order in `module.toml`**, not
+  "coursework number ascending, weight descending". For the departmental
+  layout the two agree; declared order is the rule that generalises.
+- **A blank mark counts as zero**, matching Excel's `SUM` in the sheet. A
+  student blank throughout totals 0, which is `NG` — no participation, which
+  is what a row of blanks means.
+
+`tests/test_departmental_golden.py` now runs the 20 sample rows end to end
+through `prepare_data_for_departmental_template` and asserts every total,
+every letter grade and the column layout against what Excel computed. All
+three defects above were re-introduced one at a time and watched to fail
+before the change was committed.
 
 ### Next
 
 1. **`init_module`** — write a starter `module.toml` with the explanatory
-   comments in place
-2. **Rewire the three component-dependent functions** to read from `Module`
-   rather than regexing column names. This is what unblocks the departmental
-   file:
-   - `calculate_total_module_score` — currently **drops `MCQ (10)` from the
-     total** (returns 63 where the sheet says 70), because it only counts
-     columns containing "Coursework"
-   - `sort_order_columns` — drops 4 of the 10 departmental columns
-   - `prepare_data_for_departmental_template` — passes only the `(100)`
-     columns to `check_for_weighted_columns`, so it always reports them
-     missing; and calls `make_letter_grade(df)` with a DataFrame when that
-     takes a scalar
-3. **Quiz collection** — Kev has separate code for this
-4. **Polars migration** — only once the above are correct
-5. **Marimo dashboard** — library-first; `marimo run` gives a code-free app
+   comments in place. Note `models/module_file.py` already tells users to
+   "Run init_module() to create one", and a test asserts that message, so
+   the promise is made and unkept.
+2. **Quiz collection** — Kev has separate code for this
+3. **Polars migration** — only once the above are correct
+4. **Marimo dashboard** — library-first; `marimo run` gives a code-free app
    view, which is the non-technical-colleague story
 
 ### Untested, and needing care
@@ -164,8 +199,6 @@ polars goes near them.
 
 - `make_sub_date` cannot parse `"0000 AM"` (`%I` is 12-hour). Brightspace
   appears to use `"1200 AM"`, so it may never bite. `xfail`.
-- `sort_order_columns` cannot handle the full departmental layout. `xfail`,
-  and resolved by item 2 above.
 - `assignment/visualise.py` defines its function inside `main()`, so it is
   unreachable and unexported. Delete or fix; do not port.
 - A `.pyc` is tracked despite `.gitignore` listing `__pycache__/`. Ignore

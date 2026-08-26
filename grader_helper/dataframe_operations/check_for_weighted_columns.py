@@ -1,28 +1,39 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from collections import Counter
+"""Check that every assessment needing a weighted column has one."""
+
+from ..models import Module
 
 
-def check_for_weighted_columns(col_list: list[str]) -> bool:
+def check_for_weighted_columns(
+    columns, module: Module
+) -> tuple[bool, list[str]]:
     """
-    Checks a list of columns to see if the weighted columns are present.
-    If the weighted columns are not present, the function will return False and list the pieces of coursework that are missing weighted columns.
-    If the weighted columns are present, the function will return True and an empty list.
+    Check a grade sheet's columns for the weighted columns the module needs.
 
-    Parameters:
-    col_list (list of str): List of column names to check.
+    An assessment marked on its own contribution -- an MCQ out of 10 worth 10 --
+    needs no weighted column, and is not reported missing. Only an assessment
+    whose ``marks_out_of`` and ``weight`` differ has one to look for.
+
+    Args:
+    columns: The column names to check, e.g. ``df.columns``.
+    module (Module): The module whose assessments say what is expected.
 
     Returns:
-    tuple: A boolean indicating if all weighted columns are present, and a list of missing weighted columns.
+    tuple[bool, list[str]]: Whether every expected weighted column is present,
+    and the names of those that are not.
+
+    Note:
+        The missing names are the real column names -- "Coursework 1 (40)" --
+        because the module knows the weight. The previous implementation
+        counted how many columns shared a trailing number and could only
+        report "Coursework 1", leaving the reader to work out the rest.
     """
-    coursework_numbers = [
-        int(col.split(" (")[0].split(" ")[-1])
-        for col in col_list
-        if col.split(" (")[0].split(" ")[-1].isdigit()
+    present = set(columns)
+    missing = [
+        assessment.weighted_column
+        for assessment in module.assessments
+        if assessment.needs_weighting and assessment.weighted_column not in present
     ]
-    counts = Counter(coursework_numbers)
-    missing_weighted_columns = [
-        f"Coursework {num}" for num, count in counts.items() if count < 2
-    ]
-    return not missing_weighted_columns, missing_weighted_columns
+    return not missing, missing

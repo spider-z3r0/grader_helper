@@ -30,7 +30,12 @@ import csv
 import pandas as pd
 import pytest
 
-from grader_helper import calculate_weighted_score, excel_round, make_letter_grade
+from grader_helper import (
+    calculate_weighted_score,
+    excel_round,
+    make_letter_grade,
+    prepare_data_for_departmental_template,
+)
 
 CW1_WEIGHT = 0.4  # GradeTemplate: D = C/100*40
 CW2_WEIGHT = 0.5  # GradeTemplate: F = E/2
@@ -164,3 +169,126 @@ def test_rounding_each_component_would_change_grades(samples):
     # threshold, so a change in either direction is visible.
     assert changed_total == 2
     assert changed_letter == 1
+
+
+# ---------------------------------------------------------------------------
+# End to end, through the module
+# ---------------------------------------------------------------------------
+#
+# The tests above check the arithmetic in pieces. These run the sample rows
+# through prepare_data_for_departmental_template, which is what actually
+# builds the sheet, and compare the result with what Excel computed.
+#
+# This is the pass that was blocked. The function could not complete a run at
+# all -- it called make_letter_grade with a DataFrame, which raises -- and the
+# total it would have produced dropped the MCQ.
+
+
+@pytest.fixture
+def sample_frame(samples):
+    """The 20 sample rows as a marks frame, weighted columns included.
+
+    The weighted values come from the sheet, not from our own arithmetic, so
+    a fault in calculate_weighted_score cannot mask a fault downstream.
+    """
+    return pd.DataFrame(
+        {
+            "Name": [f"Student {int(r['row'])}" for r in samples],
+            "Student ID": [str(23300000 + int(r["row"])) for r in samples],
+            "Coursework 1 (100)": [r["cw1_100"] for r in samples],
+            "Coursework 1 (40)": [r["cw1_40"] for r in samples],
+            "Coursework 2 (100)": [r["cw2_100"] for r in samples],
+            "Coursework 2 (50)": [r["cw2_50"] for r in samples],
+            "MCQ (10)": [r["mcq_10"] for r in samples],
+        }
+    )
+
+
+def test_the_prepared_sheet_reproduces_every_total(
+    sample_frame, samples, departmental_module
+):
+    prepared = prepare_data_for_departmental_template(
+        sample_frame, departmental_module
+    )
+
+    for got, row in zip(prepared["Total % Grade"], samples):
+        assert got == row["total"], f"row {int(row['row'])}"
+
+
+def test_the_prepared_sheet_reproduces_every_letter_grade(
+    sample_frame, samples, departmental_module
+):
+    prepared = prepare_data_for_departmental_template(
+        sample_frame, departmental_module
+    )
+
+    for got, row in zip(prepared["Letter Grade"], samples):
+        assert got == row["letter"], (
+            f"row {int(row['row'])}: total {row['total']}"
+        )
+
+
+def test_the_prepared_sheet_has_the_departmental_columns(
+    sample_frame, departmental_module
+):
+    """GradeTemplate row 29, less 'Comments', which the author writes."""
+    prepared = prepare_data_for_departmental_template(
+        sample_frame, departmental_module
+    )
+
+    assert list(prepared.columns) == [
+        "Name",
+        "Student ID",
+        "Coursework 1 (100)",
+        "Coursework 1 (40)",
+        "Coursework 2 (100)",
+        "Coursework 2 (50)",
+        "MCQ (10)",
+        "Total % Grade",
+        "Letter Grade",
+    ]
+
+
+def test_the_mcq_counts_towards_the_total(sample_frame, samples, departmental_module):
+    """The bug this rewrite exists to fix, named directly.
+
+    The old total summed only columns whose name contained "Coursework", so
+    the MCQ was left out of every student's mark. Row 30 is
+    29.6 + 33.25 + 7 = 69.85, which rounds to 70 (B1). Without the MCQ it is
+    62.85, which rounds to 63 (B3) -- a student handed two classifications
+    below the one they earned.
+    """
+    prepared = prepare_data_for_departmental_template(
+        sample_frame, departmental_module
+    )
+    row_30 = prepared.iloc[0]
+    assert int(samples[0]["row"]) == 30
+
+    assert row_30["Total % Grade"] == 70
+    assert row_30["Letter Grade"] == "B1"
+
+    without_mcq = excel_round(
+        samples[0]["cw1_40"] + samples[0]["cw2_50"]
+    )
+    assert without_mcq == 63, "the fixture no longer demonstrates the bug"
+    assert row_30["Total % Grade"] != without_mcq
+
+
+def test_a_student_who_submitted_nothing_is_not_participating(departmental_module):
+    """Blank marks sum to zero, as they do in the sheet, and zero is NG."""
+    df = pd.DataFrame(
+        {
+            "Name": ["Absent"],
+            "Student ID": ["23300099"],
+            "Coursework 1 (100)": [float("nan")],
+            "Coursework 1 (40)": [float("nan")],
+            "Coursework 2 (100)": [float("nan")],
+            "Coursework 2 (50)": [float("nan")],
+            "MCQ (10)": [float("nan")],
+        }
+    )
+
+    prepared = prepare_data_for_departmental_template(df, departmental_module)
+
+    assert prepared["Total % Grade"].iloc[0] == 0
+    assert prepared["Letter Grade"].iloc[0] == "NG"

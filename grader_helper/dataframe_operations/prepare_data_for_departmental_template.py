@@ -1,100 +1,129 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+"""Turn a marks frame into the departmental grade sheet's layout."""
+
 from ..dependencies import pd
-from . import (
-    calculate_total_module_score,
-    make_letter_grade,
-    check_for_weighted_columns,
-    sort_order_columns,
-)
+from ..models import Module
+from .calculate_total_module_score import TOTAL_COLUMN, calculate_total_module_score
+from .check_for_weighted_columns import check_for_weighted_columns
+from .make_letter_grade import make_letter_grade
+from .sort_order_columns import sort_order_columns
+
+#: The departmental sheet's name for the letter grade (GradeTemplate row 29).
+LETTER_COLUMN = "Letter Grade"
 
 
 def prepare_data_for_departmental_template(
-    df: pd.DataFrame, fail_threshold: int = 35
+    df: pd.DataFrame, module: Module, fail_threshold: int = 35
 ) -> pd.DataFrame:
     """
-    Uses the other dataframe operations to prepare the data for the departmental template.
-    This includes calculating the weighted scores, total module score, and letter grades.
+    Prepare a marks frame for the departmental template.
+
+    Orders the columns as the template expects, totals the module, and
+    converts each total to a letter grade.
 
     Args:
-    df (pd.DataFrame): DataFrame containing the columns to prepare for the departmental template
+    df (pd.DataFrame): DataFrame holding 'Name', 'Student ID' and the
+        module's assessment columns.
+    module (Module): The module whose assessments define the sheet's shape.
+    fail_threshold (int): The mark below which the grade is F. Defaults to 35.
 
     Returns:
-    pd.DataFrame: DataFrame with the columns prepared for the departmental template
+    pd.DataFrame: A new DataFrame in departmental order, with 'Total % Grade'
+    and 'Letter Grade' added.
 
     Note:
-    This function does not save the DataFrame to a file, it only prepares the data for the departmental template.
-    It requires that you have already brought the data from each piece of coursework (assignments, exams, etc.) into a single DataFrame,
-    and that you have already changed the name of the columns to the required format (e.g. "Coursework 1 (100)", "Coursework 2 (100)", etc.).
-    The Brightspace gradebook will have the columns named after the assignment name on brightspace, so you will need to rename them to the required format.
-    It also requires that the dataframe has a 'Student ID' and 'Name' column, which should be the case if you have used the 'ingesting' functions
-    to read in the data from each individual assignment.
-
-    Example:
-        # usage
-        df = prepare_data_for_departmental_template(df)
+        This does not save anything. It expects the marks from each piece of
+        assessment already brought into one frame, with the weighted columns
+        calculated by calculate_weighted_score. What the columns must be
+        called is not a convention to remember -- it falls out of each
+        assessment's marks_out_of and weight, so `module.grade_sheet_columns`
+        will tell you.
 
     Raises:
-    ValueError: If the DataFrame is empty, missing required columns, or missing weighted columns
+    ValueError: If the frame is empty, is missing required or assessment
+        columns, or holds non-numeric marks.
+
+    Example:
+        >>> module = load_module("module.toml")
+        >>> df = prepare_data_for_departmental_template(df, module)
     """
-    # check to make sure df is a DataFrame\
     if not isinstance(df, pd.DataFrame):
         raise ValueError("df must be a pandas DataFrame")
 
-    # check if the DataFrame is empty
+    if not isinstance(module, Module):
+        raise ValueError(
+            "module must be a Module. Load it with load_module(), which reads "
+            "module.toml and tells this function the module's shape rather "
+            "than leaving it to guess from the column names."
+        )
+
     if df.empty:
         raise ValueError("DataFrame is empty")
 
-    # check if the DataFrame has the required columns
     required_columns = ["Student ID", "Name"]
     missing_columns = [col for col in required_columns if col not in df.columns]
     if missing_columns:
         raise ValueError(f"DataFrame is missing columns: {', '.join(missing_columns)}")
 
-    # Check that there is at least one column call 'Coursework 1 (100)'
-    coursework_100_columns = [
-        col for col in df.columns if "Coursework" in col and "(100)" in col
-    ]
-    if not coursework_100_columns:
-        raise ValueError("DataFrame is missing coursework columns")
-    elif len(coursework_100_columns) == 1 and "Total % Grade" not in df.columns:
-        # if there is only one coursework column, we can calculate the total module score
-        calculate_total_module_score(df)
-    elif len(coursework_100_columns) > 1:
-        # if there is more than one coursework column, we need to check for the weighted columns
-        weighted_columns_present, missing_weighted_columns = check_for_weighted_columns(
-            coursework_100_columns
+    if not module.assessments:
+        raise ValueError(
+            f"Module {module.code} declares no assessments, so there is no "
+            "grade sheet to build. Add an [[assessment]] to module.toml."
         )
-        if weighted_columns_present == False:
-            raise ValueError(
-                f"""DataFrame is missing weighted columns: {', '.join(missing_weighted_columns)}
-                             You need to have two columns for each piece of coursework, one for the raw score and one for the weighted score.
-                             The raw score should be out of 100 and the weighted score should be out of the total marks for that piece of coursework.
-                             For example, if you have a piece of coursework worth 40 marks, you should have two columns: 'Coursework 1 (100)' and 'Coursework 1 (40)' 
-                             You can use the `calculate_weighted_score` function to calculate the weighted score from the raw score, before calling this function."""
-            )
 
-    # check that all the coursework columns are numeric
-    for col in coursework_100_columns:
+    # The raw columns are the marks as awarded; without them there is nothing
+    # to work from, whatever else the frame happens to carry.
+    missing_raw = [
+        a.raw_column for a in module.assessments if a.raw_column not in df.columns
+    ]
+    if missing_raw:
+        raise ValueError(
+            f"DataFrame is missing the marks for: {', '.join(missing_raw)}.\n"
+            f"Module {module.code} declares "
+            f"{len(module.assessments)} assessment(s), so the sheet needs "
+            f"these columns: {', '.join(module.grade_sheet_columns)}."
+        )
+
+    weighted_present, missing_weighted = check_for_weighted_columns(
+        df.columns, module
+    )
+    if not weighted_present:
+        raise ValueError(
+            f"""DataFrame is missing weighted columns: {', '.join(missing_weighted)}
+            An assessment marked out of more than it is worth needs two columns: the mark
+            as awarded, and its contribution to the module total. Coursework 1 marked out
+            of 100 and worth 40 needs 'Coursework 1 (100)' and 'Coursework 1 (40)'.
+            Use `calculate_weighted_score` to create the second from the first before
+            calling this function. An assessment already marked on its contribution -- an
+            MCQ out of 10 worth 10 -- needs only the one column and is not listed here."""
+        )
+
+    for col in module.grade_sheet_columns:
         if df[col].dtype not in ["int64", "float64"]:
             raise ValueError(
-                f"""Column {col} is not numeric, you can only calculate the weighted score of numeric columns.
-                             This might be because there are non-numeric values in the column. Please inspect the column 
-                             and make sure it only contains numeric values. If it doesn't, you can convert the column to numeric with
-                            `pd.to_numeric(errors='coerce')` but make sure you understand the data before doing this!"""
+                f"""Column {col} is not numeric, and only numeric columns can be totalled.
+                This usually means there are non-numeric values in it. Inspect the column
+                before doing anything: if you are satisfied the values really are marks,
+                `pd.to_numeric(errors='coerce')` will convert it, turning anything it
+                cannot read into a missing value. MAKE SURE YOU UNDERSTAND THE DATA FIRST."""
             )
 
-    # sort the columns in the correct order
-    try:
-        df = df.reindex(columns=sort_order_columns(df))
-    except Exception as e:
-        raise ValueError(f"Error sorting columns: {e}")
+    df = df.reindex(columns=sort_order_columns(df.columns, module))
 
-    # calculate the total module score
-    calculate_total_module_score(df)
+    error = calculate_total_module_score(df, module)
+    if error is not None:
+        raise ValueError(error)
 
-    # calculate the letter grades
-    make_letter_grade(df, fail_threshold=fail_threshold)
+    # make_letter_grade takes one score, not a frame -- so map it over the
+    # totals. Calling it with the DataFrame raised
+    # ValueError("Score must be an integer or float.") every time, which made
+    # this function unusable end to end.
+    df[LETTER_COLUMN] = df[TOTAL_COLUMN].map(
+        lambda score: make_letter_grade(score, fail_threshold=fail_threshold)
+    )
 
-    return df
+    # Total and Letter Grade were added after the reindex, so put the whole
+    # sheet into departmental order once everything exists.
+    return df.reindex(columns=sort_order_columns(df.columns, module))

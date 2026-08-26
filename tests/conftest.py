@@ -115,3 +115,73 @@ def brightspace_tree(tmp_path, fake_students):
 def folder_name():
     """The Brightspace folder-name builder, for tests that add submissions."""
     return brightspace_folder_name
+
+
+# ---------------------------------------------------------------------------
+# Modules
+# ---------------------------------------------------------------------------
+#
+# The grade-sheet functions are told a module's shape rather than inferring it
+# from column names, so most of them need a Module. These build one without
+# each test restating the parts it does not care about.
+
+
+def make_assessment(**overrides):
+    """One assessment, defaulting to Coursework 1 out of 100 worth 40."""
+    from grader_helper.models import Assessment
+
+    defaults = dict(
+        id="cw1",
+        type="coursework",
+        name="Coursework 1",
+        marks_out_of=100,
+        weight=40,
+    )
+    return Assessment(**{**defaults, **overrides})
+
+
+def make_module(assessments=None, **overrides):
+    """A module, defaulting to one coursework worth the whole 100."""
+    from grader_helper.models import Module
+
+    defaults = dict(
+        code="PS4001",
+        name="Advanced Research Methods",
+        year="2025/26",
+        leader="KOM",
+        assessments=assessments
+        if assessments is not None
+        else [make_assessment(weight=100)],
+    )
+    return Module(**{**defaults, **overrides})
+
+
+#: The module the 2026 departmental sample data describes: two courseworks
+#: marked out of 100 and worth 40 and 50, and an MCQ marked out of 10 and
+#: worth 10. The MCQ is the case that matters -- marked on its own
+#: contribution, so it has one column, and it is the component the old
+#: "Coursework"-substring code dropped from every total.
+DEPARTMENTAL_ASSESSMENTS = [
+    dict(id="cw1", type="coursework", name="Coursework 1", marks_out_of=100, weight=40),
+    dict(id="cw2", type="coursework", name="Coursework 2", marks_out_of=100, weight=50),
+    dict(id="mcq", type="mcq", name="MCQ", marks_out_of=10, weight=10),
+]
+
+
+@pytest.fixture
+def departmental_module():
+    """The module behind tests/resources/gradetemplate_samples.csv."""
+    return make_module(
+        assessments=[make_assessment(**spec) for spec in DEPARTMENTAL_ASSESSMENTS]
+    )
+
+
+@pytest.fixture
+def two_coursework_module():
+    """Two courseworks out of 100, worth 40 and 60."""
+    return make_module(
+        assessments=[
+            make_assessment(id="cw1", name="Coursework 1", weight=40),
+            make_assessment(id="cw2", name="Coursework 2", weight=60),
+        ]
+    )
