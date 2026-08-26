@@ -380,10 +380,17 @@ Two things the walkthrough surfaced, neither a bug:
 - `assignment/visualise.py` defines its function inside `main()`, so it is
   unreachable and unexported. Delete or fix; do not port.
 - **`brightspace_name_folders` has no tests at all.** It is the last step
-  before re-upload, so a failure there reaches students. It also mutates the
-  caller's DataFrame in place (upper-casing `Suggested Name` and `Original
-  Name`), writes two CSV logs as side effects, wraps the rename in a bare
-  `except Exception`, and returns nothing.
+  before re-upload, so a failure there reaches students. It writes two CSV
+  logs as side effects, wraps the rename in a bare `except Exception`, and
+  returns nothing.
+
+  It also upper-cases `Original Name` and `Suggested Name` in place — but on
+  the *rename log*, not the class list, so this matters little. The two steps
+  hand off through a file rather than a value: `alphabetise_folders` takes the
+  class list (which it leaves alone), returns `None`, and writes
+  `folder_rename_log.csv` into the submissions folder;
+  `brightspace_name_folders` is then fed that log, read back off disk. Worth
+  knowing before looking for a return value that is not there.
 - **No moderation pack.** `Assessment.status.moderated` and
   `Module.internal_moderator` exist, but nothing samples submissions or
   stratifies them by letter grade. A feature to build, not a gap to cover.
