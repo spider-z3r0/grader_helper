@@ -1,20 +1,24 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-"""The coursework column-naming contract.
+r"""The coursework column-naming contract.
 
-Three functions share an implicit convention for coursework column names,
-and they disagree about it. The docstrings across the package state the
-intended form as ``"Coursework 1 (40)"`` -- one space, integer weight, no
-percent sign:
+Three functions share a convention for coursework column names:
 
-  - calculate_weighted_score  WRITES the weighted column
-  - sort_order_columns        READS it via r"Coursework (\\d+) \\((\\d+)\\)"
+  - calculate_weighted_score   WRITES the weighted column
+  - sort_order_columns         READS it via r"Coursework (\d+) \((\d+)\)"
   - check_for_weighted_columns READS it by splitting on " ("
 
-These tests pin the convention down before the polars migration, because
-the migration has to preserve or deliberately fix it, and it cannot do
-either while the contract is undocumented.
+The source of truth is the 2026 departmental grade sheet, whose header row
+(GradeTemplate row 29) is:
+
+    Name | Student ID | Coursework 1 (100) | Coursework 1 (40) |
+    Coursework 2 (100) | Coursework 2 (50) | MCQ (10) |
+    Total % Grade | Letter Grade | Comments
+
+So the form is "<component> (<weight>)": one space, integer weight, no
+percent sign. calculate_weighted_score used to produce
+"Coursework 1  (40.0%)" instead, which neither reader could match.
 """
 
 import pandas as pd
@@ -25,8 +29,23 @@ from grader_helper import (
     check_for_weighted_columns,
     sort_order_columns,
 )
+from grader_helper.dataframe_operations.calculate_weighted_score import (
+    weighted_column_name,
+)
 
-INTENDED_WEIGHTED_NAME = "Coursework 1 (40)"
+#: GradeTemplate row 29, verbatim.
+DEPARTMENTAL_HEADERS = [
+    "Name",
+    "Student ID",
+    "Coursework 1 (100)",
+    "Coursework 1 (40)",
+    "Coursework 2 (100)",
+    "Coursework 2 (50)",
+    "MCQ (10)",
+    "Total % Grade",
+    "Letter Grade",
+    "Comments",
+]
 
 
 @pytest.fixture
@@ -42,65 +61,52 @@ def scored():
 
 
 def test_weighted_score_arithmetic_is_correct(scored):
-    """The maths is right even though the label is not."""
     calculate_weighted_score(scored, "Coursework 1 (100)", 0.4)
-    produced = [c for c in scored.columns if "%" in c][0]
-    assert scored[produced].tolist() == [28.0, 32.0]
+    assert scored["Coursework 1 (40)"].tolist() == [28.0, 32.0]
 
 
-def test_weighted_column_name_as_currently_produced(scored):
-    """Characterisation: the name actually produced today.
-
-    ``col_name.split('(')[0]`` keeps the trailing space, and
-    ``str(weight * 100)`` renders a float -- so 0.4 becomes "40.0", not
-    "40". Hence a double space and a decimal point.
-    """
-    calculate_weighted_score(scored, "Coursework 1 (100)", 0.4)
-    assert "Coursework 1  (40.0%)" in scored.columns
-
-
-@pytest.mark.xfail(
-    reason=(
-        "calculate_weighted_score writes 'Coursework 1  (40.0%)' but every "
-        "reader expects 'Coursework 1 (40)'. Fix the producer to match the "
-        "documented convention."
-    ),
-    strict=True,
+@pytest.mark.parametrize(
+    "weight,expected",
+    [
+        (0.4, "Coursework 1 (40)"),
+        (0.5, "Coursework 1 (50)"),
+        (0.6, "Coursework 1 (60)"),
+        (0.1, "Coursework 1 (10)"),
+        (0.125, "Coursework 1 (12.5)"),
+    ],
 )
-def test_weighted_column_name_should_match_documented_convention(scored):
+def test_weighted_column_name(weight, expected):
+    assert weighted_column_name("Coursework 1 (100)", weight) == expected
+
+
+def test_weighted_column_name_matches_the_departmental_sheet(scored):
     calculate_weighted_score(scored, "Coursework 1 (100)", 0.4)
-    assert INTENDED_WEIGHTED_NAME in scored.columns
+    calculate_weighted_score(scored, "Coursework 2 (100)", 0.5)
+
+    assert "Coursework 1 (40)" in scored.columns
+    assert "Coursework 2 (50)" in scored.columns
 
 
-@pytest.mark.xfail(
-    reason=(
-        "sort_order_columns silently DROPS the weighted columns because its "
-        "regex cannot match the name calculate_weighted_score produces. "
-        "prepare_data_for_departmental_template reindexes on this result, so "
-        "the weighted scores are discarded from the departmental grade file."
-    ),
-    strict=True,
-)
+def test_a_full_weight_would_overwrite_the_raw_marks(scored):
+    """Guard against a silent overwrite rather than doing it."""
+    error = calculate_weighted_score(scored, "Coursework 1 (100)", 1.0)
+
+    assert error is not None
+    assert "overwrite" in error
+    assert scored["Coursework 1 (100)"].tolist() == [70, 80]
+
+
 def test_sort_order_columns_keeps_the_weighted_columns(scored):
     calculate_weighted_score(scored, "Coursework 1 (100)", 0.4)
     calculate_weighted_score(scored, "Coursework 2 (100)", 0.6)
 
     ordered = sort_order_columns(scored.columns)
 
-    weighted = [c for c in scored.columns if "%" in c]
+    weighted = ["Coursework 1 (40)", "Coursework 2 (60)"]
     missing = [c for c in weighted if c not in ordered]
     assert not missing, f"sort_order_columns dropped {missing}"
 
 
-@pytest.mark.xfail(
-    reason=(
-        "check_for_weighted_columns reports the weighted columns missing "
-        "immediately after calculate_weighted_score created them, so "
-        "prepare_data_for_departmental_template raises 'DataFrame is missing "
-        "weighted columns' on the documented workflow."
-    ),
-    strict=True,
-)
 def test_check_for_weighted_columns_sees_freshly_created_columns(scored):
     calculate_weighted_score(scored, "Coursework 1 (100)", 0.4)
     calculate_weighted_score(scored, "Coursework 2 (100)", 0.6)
@@ -110,36 +116,29 @@ def test_check_for_weighted_columns_sees_freshly_created_columns(scored):
     assert present, f"reported missing: {missing}"
 
 
-def test_readers_agree_on_the_intended_convention():
-    """Both readers must accept the documented form.
-
-    This one passes today: it is the anchor that says what the producer
-    should be fixed *to*, rather than changing the readers to accept the
-    malformed name.
-    """
+def test_readers_accept_the_departmental_convention():
     columns = [
         "Name",
         "Student ID",
         "Coursework 1 (100)",
         "Coursework 1 (40)",
         "Coursework 2 (100)",
-        "Coursework 2 (60)",
+        "Coursework 2 (50)",
     ]
 
     ordered = sort_order_columns(columns)
     assert "Coursework 1 (40)" in ordered
-    assert "Coursework 2 (60)" in ordered
+    assert "Coursework 2 (50)" in ordered
 
     present, missing = check_for_weighted_columns(columns)
     assert present, f"reported missing: {missing}"
 
 
 def test_sort_order_columns_orders_by_number_then_weight_descending():
-    """Characterisation of the intended ordering."""
     columns = [
         "Name",
         "Student ID",
-        "Coursework 2 (60)",
+        "Coursework 2 (50)",
         "Coursework 1 (40)",
         "Coursework 2 (100)",
         "Coursework 1 (100)",
@@ -150,5 +149,23 @@ def test_sort_order_columns_orders_by_number_then_weight_descending():
         "Coursework 1 (100)",
         "Coursework 1 (40)",
         "Coursework 2 (100)",
-        "Coursework 2 (60)",
+        "Coursework 2 (50)",
     ]
+
+
+@pytest.mark.xfail(
+    reason=(
+        "sort_order_columns only recognises components literally named "
+        "'Coursework N', and hardcodes the non-component columns as "
+        "['Name', 'Student ID']. The departmental sheet also carries "
+        "'MCQ (10)', 'Total % Grade', 'Letter Grade' and 'Comments', all of "
+        "which it silently drops. Generalising it needs a decision about "
+        "what counts as a component and how components are ordered when "
+        "they are not numbered."
+    ),
+    strict=True,
+)
+def test_sort_order_columns_handles_the_full_departmental_layout():
+    ordered = sort_order_columns(DEPARTMENTAL_HEADERS)
+    dropped = [c for c in DEPARTMENTAL_HEADERS if c not in ordered]
+    assert not dropped, f"dropped {dropped}"
