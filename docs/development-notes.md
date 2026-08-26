@@ -36,10 +36,10 @@ defect, not a simplification.
 
 ### Sequencing
 
-Correctness, then polars, then the app. The migration waits on the
-Excel-writing functions being covered by tests (see **Untested, and needing
-care**) — porting code whose behaviour nothing pins down is how silent
-breakage gets in.
+Correctness, then polars, then the app. The Excel-writing functions that
+gated the migration are now covered and repaired (see **The Excel round
+trip**), so polars is unblocked — the round-trip tests are what a port has
+to keep passing.
 
 Two practical notes for whoever starts the migration:
 
@@ -179,7 +179,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 218 tests:
+Done, 264 tests:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -193,6 +193,7 @@ Done, 218 tests:
 - The four grade-sheet functions read from `Module` instead of regexing
   column names — see below
 - `init_module` writes a starter `module.toml`, comments and all
+- The four Excel-writing functions covered and repaired — see below
 
 ### The rewire onto `Module`
 
@@ -266,16 +267,64 @@ checked by exactly the path that reads it back.
 ### Next
 
 1. **Quiz collection** — Kev has separate code for this
-2. **Polars migration** — only once the above are correct; see
-   **The aim → Sequencing** for what it is gated on
+2. **Polars migration** — unblocked; the Excel round-trip tests are the
+   contract a port has to keep
 3. **Marimo dashboard** — the non-technical-colleague story, built strictly
    on top of the library
 
-### Untested, and needing care
+### The Excel round trip
 
-`distribute_feedback_sheets`, `save_grader_sheets`, `save_distributed_graders`,
-`ingest_completed_graderfiles`. All write Excel; all need covering before
-polars goes near them.
+`distribute_feedback_sheets`, `save_grader_sheets`,
+`save_distributed_graders` and `ingest_completed_graderfiles` are covered.
+They form one loop — allocate, write a workbook per grader, mark, read back —
+so the test that earns its keep is the round trip, not any one of them.
+
+**No Excel needed.** These go through pandas and openpyxl, not xlwings, so
+they run on Linux CI as well as on Windows. Only the `excel`-marked tests
+need a real installation.
+
+**`input()` is gone from the package.** Three of the four prompted on stdin
+before replacing a file. That made them untestable without faking stdin and,
+more to the point, unusable from the dashboard — `marimo run` has no
+terminal, so an `input()` waits forever. Each now takes `overwrite: bool =
+False` and raises `FileExistsError`, the same refusal `init_module` makes and
+for the same reason.
+
+What was wrong, all of it silent:
+
+- **Student ids were destroyed on the round trip.** A column of digit
+  strings goes to Excel and comes back `int64`: `'00123456'` → `123456`. The
+  leading zeros are gone, and merging against the class list does not
+  mismatch quietly — pandas raises `You are trying to merge on object and
+  int64 columns`. Id columns are now read as text explicitly (`ID_COLUMNS`).
+  This is the one that would have been faithfully carried into polars.
+- **`save_distributed_graders` wrote a phantom index column** when
+  overwriting: `index=False` on the first write, omitted on the second. The
+  spurious column then travelled into every downstream read.
+- **`ingest_completed_graderfiles` died confusingly on an empty run.**
+  `pd.concat([])` raises `ValueError`, only `pd.errors.MergeError` was
+  caught, and the fall-through returned an unbound name. A missing grader
+  file is now refused outright (`require_all=True`) — missing files mean
+  missing marks — or warned about if you opt out.
+- **`save_grader_sheets` crashed on Enter**: `choice[0]` on an empty string
+  raises `IndexError`, and the `or choice == ""` after it was unreachable. It
+  also swallowed every exception into a `print`, so a failed write was
+  indistinguishable from a successful one.
+- **`distribute_feedback_sheets` only matched the parenthesised UL folder
+  form**, so it silently found nothing on a fresh Brightspace download and
+  had to be preceded by `alphabetise_folders`. Nothing said so. It now
+  accepts both forms, reusing `parse_brightspace_folder`.
+- **Group distribution hardcoded the word "Team"**, so a module calling them
+  "Group 1" got no feedback sheets at all.
+
+All four now return what they did rather than printing it — a `Distribution`
+namedtuple, a dict of paths, a path. The dashboard cannot read stdout.
+
+One test was written, watched to pass against the *broken* code, and
+rewritten: the partial-write guard put the file clash on the first grader, so
+the refusal fired before anything was written and a per-file check passed by
+luck. Moving the clash to the last grader made it a real test. Worth
+remembering that "reintroduce the bug" catches bad tests, not just bad code.
 
 ### Known gaps
 
@@ -295,4 +344,7 @@ polars goes near them.
 - **`xfail(strict=True)`** — a fixed bug turns the marker into a failure, so
   stale markers cannot accumulate.
 - **Verify a guard by reintroducing the bug.** A test that has never been
-  seen to fail is not yet a test.
+  seen to fail is not yet a test. It catches bad *tests*, not just bad code:
+  the partial-write guard on `save_grader_sheets` passed against a knowingly
+  broken version, because the file clash was on the first grader and the
+  refusal fired before anything was written. The test was asserting nothing.
