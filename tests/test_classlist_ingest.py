@@ -124,3 +124,71 @@ def test_load_graders_reads_one_name_per_line(resources_dir):
         "ABC",
         "DEF",
     ]
+
+
+# ---------------------------------------------------------------------------
+# Locating the group column
+# ---------------------------------------------------------------------------
+#
+# A group column reaches the class list one of two ways: Brightspace's own
+# group function exports it as "Group Name", or the module leader adds it by
+# hand and may call it whatever they like. group=True has to cope with both.
+
+
+def _classlist_with_group_column(classlist_file, tmp_path, column_name):
+    df = pd.read_excel(classlist_file)
+    df[column_name] = [f"Team {i % 5 + 1}" for i in range(len(df))]
+    out = tmp_path / f"classlist_{column_name.replace(' ', '_')}.xlsx"
+    df.to_excel(out, index=False)
+    return out
+
+
+@pytest.mark.parametrize(
+    "column_name",
+    [
+        "Group Name",   # what Brightspace's group function exports
+        "Group",        # already normalised
+        "group name",   # module leader, lowercase
+        "GROUP NAME",   # module leader, shouting
+        "group",
+        "Groups",
+        "Team",         # a module leader thinking in teams
+        "Group_Name",
+    ],
+)
+def test_group_column_is_found_however_it_is_named(
+    classlist_file, tmp_path, column_name
+):
+    path = _classlist_with_group_column(classlist_file, tmp_path, column_name)
+
+    out = import_brightspace_classlist(path, group=True)
+
+    assert out is not None, f"failed to find a group column named {column_name!r}"
+    assert "Group" in out.columns
+    assert out["Group"].nunique() == 5
+
+
+def test_an_explicitly_named_group_column_is_honoured(classlist_file, tmp_path):
+    """An escape hatch for a name nobody could reasonably guess."""
+    path = _classlist_with_group_column(classlist_file, tmp_path, "Tutorial Cohort")
+
+    out = import_brightspace_classlist(
+        path, group=True, group_column="Tutorial Cohort"
+    )
+
+    assert out is not None
+    assert out["Group"].nunique() == 5
+
+
+def test_missing_group_column_reports_what_it_looked_for(
+    classlist_file, capsys
+):
+    """A class list with no group column at all must say so clearly."""
+    out = import_brightspace_classlist(classlist_file, group=True)
+
+    assert out is None
+    message = capsys.readouterr().out
+    assert "group" in message.lower()
+    # The message must name the columns that ARE present, so the user can see
+    # what to rename.
+    assert "Last Name" in message
