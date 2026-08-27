@@ -269,11 +269,41 @@ checked by exactly the path that reads it back.
 
 ### Next
 
-1. **Quiz collection** — Kev has separate code for this
-2. **Polars migration** — unblocked; the Excel round-trip tests are the
-   contract a port has to keep
-3. **Marimo dashboard** — the non-technical-colleague story, built strictly
-   on top of the library
+The route to a module a leader can run end to end, in order. Each step
+assumes the one before it works.
+
+1. **Quiz / MCQ collection** — Kev has separate code for this. The one
+   assessment type the walkthrough does not yet drive.
+2. **Write everything to the departmental grade file** — the pieces exist
+   (`prepare_data_for_departmental_template` is golden-tested); what is
+   missing is getting a whole module's collated marks into the actual
+   workbook.
+3. **Moderation packs, internal and external** — two packs, not one, and
+   they are not the same job. Internal moderation is a second-marking check;
+   the external examiner wants a sample spanning the range. Decide the
+   sampling rule for each before writing either. Nothing exists yet;
+   `Assessment.status.moderated` and `Module.internal_moderator` are the only
+   hooks.
+4. **Final marks for upload to SI** — whatever format the student
+   information system wants, which nothing in the package knows about yet.
+5. **Module initialisation as a workflow** — a module leader specifying
+   paths, weightings and how many assessments, rather than hand-editing
+   `module.toml`. `init_module` is the machinery; this is the front door to
+   it.
+6. **Marimo dashboard** — dropdowns and convenience features. The
+   non-technical-colleague story, built strictly on top of the library.
+
+**Polars migration** is unblocked but not scheduled: the Excel round-trip
+tests are the contract a port has to keep, and it can land whenever it stops
+being a distraction from the list above.
+
+#### A note on the walkthrough notebook
+
+`notebooks/grading_walkthrough.py` is deliberately plain and explicit, with
+cw1 and cw2 written out in full rather than driven by a selector. That is the
+point while the process is still being stepped through and checked -- every
+value visible, nothing hidden behind a widget. Convenience features belong in
+step 6, not before.
 
 ### The Excel round trip
 
