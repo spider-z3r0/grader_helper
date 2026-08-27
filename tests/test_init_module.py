@@ -266,6 +266,51 @@ def test_bare_initials_stay_bare(tmp_path):
     assert "[module.leader]" not in text
 
 
+def test_a_scalar_person_is_not_swallowed_by_a_preceding_sub_table(tmp_path):
+    """The bug: once [module.leader] is open, a bare key after it is the
+    leader's, not the module's.
+
+    A detailed leader becomes [module.leader]; a moderator given as bare
+    initials was then written after that heading, so TOML parsed it as
+    Person(initials="KOM", name="...", internal_moderator="SOB"), pydantic
+    ignored the unknown key, and the moderator vanished with no error.
+    Scalars must all be written before any sub-table.
+    """
+    init_module(
+        tmp_path,
+        "PS4001",
+        "Research Methods",
+        "2025/26",
+        {"initials": "KOM", "name": "Kevin O Malley"},   # -> a sub-table
+        internal_moderator="SOB",                        # -> a scalar
+    )
+
+    module = load_module(tmp_path)
+
+    assert module.leader.initials == "KOM"
+    assert module.leader.name == "Kevin O Malley"
+    assert module.internal_moderator is not None, (
+        "the moderator was swallowed by [module.leader]"
+    )
+    assert module.internal_moderator.initials == "SOB"
+
+
+def test_both_people_can_carry_detail(tmp_path):
+    init_module(
+        tmp_path,
+        "PS4001",
+        "Research Methods",
+        "2025/26",
+        {"initials": "KOM", "name": "Kevin O Malley"},
+        internal_moderator={"initials": "SOB", "email": "s.o.b@ul.ie"},
+    )
+
+    module = load_module(tmp_path)
+
+    assert module.leader.name == "Kevin O Malley"
+    assert module.internal_moderator.email == "s.o.b@ul.ie"
+
+
 def test_an_internal_moderator_is_optional(tmp_path):
     init_module(tmp_path, "PS4001", "Research Methods", "2025/26", "KOM")
     assert load_module(tmp_path).internal_moderator is None

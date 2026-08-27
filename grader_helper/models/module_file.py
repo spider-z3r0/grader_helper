@@ -423,14 +423,28 @@ def init_module(
     # A person is written as a sub-table when there is detail to carry, and
     # as bare initials when there is not -- the same shorthand the reader
     # accepts, so a hand-written file and a generated one look alike.
-    for key, person in (("leader", leader), ("internal_moderator", internal_moderator)):
-        if person is None:
-            continue
-        person = as_person(person)
+    #
+    # Scalars must all be written BEFORE any sub-table. Once [module.leader]
+    # is open, a bare `internal_moderator = "SOB"` after it belongs to the
+    # leader, not to [module] -- so the moderator is parsed as an unknown key
+    # on Person, ignored, and silently lost.
+    people = [
+        (key, as_person(person))
+        for key, person in (
+            ("leader", leader),
+            ("internal_moderator", internal_moderator),
+        )
+        if person is not None
+    ]
+
+    for key, person in people:
         rendered = person.model_dump()
         if isinstance(rendered, str):
             text += f"{key} = {_toml_value(rendered)}\n"
-        else:
+
+    for key, person in people:
+        rendered = person.model_dump()
+        if not isinstance(rendered, str):
             text += f"\n[module.{key}]\n"
             for field, value in rendered.items():
                 text += f"{field} = {_toml_value(value)}\n"
