@@ -52,6 +52,107 @@ Two practical notes for whoever starts the migration:
   runtime dependency, probably behind an optional extra so library users do
   not pull in an app framework they will never launch.
 
+## The domain
+
+What the software is modelling. Written down because none of it is guessable
+from the code, and getting it wrong produces plausible output rather than an
+error.
+
+### The people
+
+| role | does |
+|---|---|
+| **Grader** | Marks submissions. May be the module leader or someone else. |
+| **Module leader (ML)** | Owns the module. Allocates graders, collates marks, verifies internally, assembles moderation packs, submits final marks. |
+| **Internal moderator** | A member of staff **not on the teaching team**. Reviews a sample of the marked work. |
+| **External examiner** | Outside the institution. Takes a view of the whole module at the end. |
+
+`Module.leader` and `Module.internal_moderator` exist as `Person` fields.
+There is no field for the external examiner yet.
+
+### The lifecycle of one assessment
+
+1. **Download** the submissions from Brightspace and unzip them.
+2. **Alphabetise** the folders into UL format, so they sort by surname.
+   Refuses while any student has more than one submission — resolving those
+   is a judgement call.
+3. **Allocate** graders across the class list. Written to
+   `distributed.xlsx` at the assessment root, and to one workbook per grader
+   in `grading_output/`.
+4. **Distribute** a blank feedback sheet into each student's folder.
+5. **Grader marks.** The feedback sheet *calculates* a final score in its
+   grade cell, and the grader **copies that value** into their own grade
+   sheet.
+6. **ML collates.** `ingest_completed_graderfiles` concatenates the grader
+   sheets into `completed_grades.xlsx` — a filled-in `distributed.xlsx`.
+7. **ML reconciles.** `catch_grades` reads the feedback sheets and the two
+   records are compared. **Step 5 is a manual copy, and this is the control
+   that catches it going wrong.** The student receives the feedback sheet;
+   the department receives the collated file; they must agree.
+8. **ML verifies internally** — usually by second-marking *n* submissions
+   per grader. A check on the graders, done inside the teaching team.
+9. **Internal moderation** — see below.
+10. **Rename** the folders back to Brightspace format for re-upload.
+
+Steps 1–7 and 10 exist in code. Steps 8 and 9 do not.
+
+### Moderation
+
+Internal and external moderation are closely related, and the relationship is
+the thing to get right: **the external pack is assembled from the internal
+packs, not sampled separately.**
+
+**Internal moderation** happens per assessment, once the ML has collated and
+internally verified. The pack goes to a member of staff who is *not* on the
+teaching team, and contains two things:
+
+- a **random selection of *n* submissions per grade band**, where *n* depends
+  on the size of the cohort; and
+- **any cases the ML flags** for a second opinion — typically a student
+  sitting on a boundary that matters, an A2 that might be an A1, or a mark
+  that might be a pass or a fail.
+
+So a pack is `sample per band` + `ML-flagged cases`. Two sources, one pack.
+The flagged cases are the ML's judgement and cannot be derived from the
+marks alone, so whatever builds the pack has to accept them as input.
+
+**External moderation** happens once the whole module is complete. The
+external examiner is sent a pack containing **all of the internal moderator
+packs**, so they can take a higher-level view across the module rather than
+assessment by assessment.
+
+That has a direct consequence for how this gets built: internal packs are
+the unit of work, and the external pack is an assembly step over them. Build
+the internal pack well and the external one is mostly collection. It also
+means internal packs must be *kept*, not discarded once the internal
+moderator reports back.
+
+Open decisions, both the ML's to make rather than the tool's:
+
+- **what *n* is**, as a function of cohort size
+- **what counts as a band for sampling** — the ten letter grades, or coarser
+  groupings
+
+`Assessment.status.moderated` is the only hook that exists today.
+
+### Where a mark can go wrong
+
+Worth keeping in view, because most of the checks in this package exist for
+one of these:
+
+- **The transcription at step 5.** A human copying a number. Caught by the
+  reconciliation at step 7.
+- **Excel round-tripping the student id.** `'00123456'` reads back as
+  `123456`; merging then raises rather than mismatching quietly. Id columns
+  are read as text explicitly.
+- **Rounding.** Excel rounds half away from zero, Python half to even. On an
+  exact half that is a different letter grade.
+- **Dropping a component.** A total that misses an assessment is still a
+  plausible number. The `Module` knows what to sum, so it cannot silently
+  omit one.
+- **A resubmission.** Two folders, one student; whichever feedback sheet is
+  found gets read. Resolve before marking, not after.
+
 ## Branches
 
 **`develop` is the one long-lived branch.** Work goes there; it merges into
@@ -278,12 +379,13 @@ assumes the one before it works.
    (`prepare_data_for_departmental_template` is golden-tested); what is
    missing is getting a whole module's collated marks into the actual
    workbook.
-3. **Moderation packs, internal and external** — two packs, not one, and
-   they are not the same job. Internal moderation is a second-marking check;
-   the external examiner wants a sample spanning the range. Decide the
-   sampling rule for each before writing either. Nothing exists yet;
-   `Assessment.status.moderated` and `Module.internal_moderator` are the only
-   hooks.
+3. **Moderation packs** — see **The domain → Moderation**. The internal
+   pack is the unit of work: a random sample of *n* per grade band, plus the
+   cases the ML flags for a second opinion. The external pack is an assembly
+   over the internal ones, so internal packs must be kept rather than
+   discarded. Two decisions first, both the ML's: what *n* is as a function
+   of cohort size, and what counts as a band. Nothing exists yet;
+   `Assessment.status.moderated` is the only hook.
 4. **Final marks for upload to SI** — whatever format the student
    information system wants, which nothing in the package knows about yet.
 5. **Module initialisation as a workflow** — a module leader specifying
@@ -359,33 +461,19 @@ the refusal fired before anything was written and a per-file check passed by
 luck. Moving the clash to the last grader made it a real test. Worth
 remembering that "reintroduce the bug" catches bad tests, not just bad code.
 
-### How marking actually works
+### The reconciliation, in code
 
-Worth writing down, because the code reads as though `catch_grades` and
-`ingest_completed_graderfiles` were alternatives. They are not — they are the
-two halves of one audit, run by different people.
+The process itself is in **The domain → The lifecycle of one assessment**;
+this is what it looks like from the code, which reads as though
+`catch_grades` and `ingest_completed_graderfiles` were alternatives. They are
+not — they are the two halves of one audit, run by different people, and
+running only one gets you numbers without the control.
 
-1. **Grader** fills in the feedback sheet. `grade_cell` *calculates* the
-   score from the rubric rows above it.
-2. **Grader** copies that value into their own grade sheet (`KOM.xlsx`).
-3. **Module leader** collates the grade sheets into
-   `completed_grades.xlsx` — which is just a filled-in `distributed.xlsx`:
-   the same allocation, with marks in it.
-4. **Module leader** runs `catch_grades` over the feedback sheets and
-   reconciles the two.
-
-**Step 2 is a manual copy, and that is the whole reason for step 4.** The
-student receives the feedback sheet; the department receives the collated
-file. Reconciling them is what catches a mark that was mistyped between the
-two. Running only one of `catch_grades` or `ingest_completed_graderfiles`
-gets you numbers without the control.
+`notebooks/grading_walkthrough.py` walks it, labelled by who does each step.
 
 Not every disagreement is a fault. A student who never submitted is still
 allocated a grader from the class list, so they reach the collated file but
 have no feedback sheet to read — `right_only` on the merge.
-
-`notebooks/grading_walkthrough.py` walks all four steps, labelled by who does
-each one.
 
 **Known gap in the fixture.** A real feedback sheet holds a *formula* in the
 grade cell, and `extract_studentid_grade` reads the *cached* result — which
