@@ -35,8 +35,9 @@ with app.setup():
     # every time it runs.
     ROOT = pl.Path.home() / "grader_helper_scratch" / "PS4001"
 
-    # Which assessment this walkthrough drives.
-    ASSESSMENT_ID = "cw1"
+    # The assessments this walkthrough drives.
+    ASSESSMENT_1_ID = "cw1"
+    ASSESSMENT_2_ID = "cw2"
 
 
 @app.cell
@@ -91,8 +92,8 @@ def init_the_module():
 
 
 @app.cell
-def pick_the_assessment(MODULE):
-    A = MODULE.assessment(ASSESSMENT_ID)
+def cw1_pick_the_assessment(MODULE):
+    A = MODULE.assessment(ASSESSMENT_1_ID)
     GRADERS = [person.initials for person in A.graders]
 
     mo.md(f"""
@@ -119,7 +120,7 @@ def ingest_class_list(MODULE):
 
 
 @app.cell
-def check_for_resubmissions(A):
+def cw1_check_for_resubmissions(A):
     # alphabetise_folders refuses to rename anything while a student has more
     # than one submission folder, so find them first. Resolve by deleting the
     # ones that do not count -- which one counts is a judgement call, not
@@ -136,7 +137,7 @@ def check_for_resubmissions(A):
 
 
 @app.cell
-def resolve_resubmissions(A, repeated):
+def cw1_resolve_resubmissions(A, repeated):
     # Keeps the EARLIEST submission for each repeat. Change to [:-1] to keep
     # the latest instead. Delete this cell entirely once you would rather
     # resolve them by hand.
@@ -159,7 +160,7 @@ def resolve_resubmissions(A, repeated):
 
 
 @app.cell
-def distribute_graders(cl, GRADERS):
+def cw1_distribute_graders(cl, GRADERS):
     # Even split, randomised. overwrite=True lets the cell re-run.
     allocation = assign_graders_individual(cl, GRADERS, overwrite=True)
 
@@ -168,7 +169,7 @@ def distribute_graders(cl, GRADERS):
 
 
 @app.cell
-def save_the_grader_sheets(A, GRADERS, allocation):
+def cw1_save_the_grader_sheets(A, GRADERS, allocation):
     # The master allocation sits at the assessment root; the per-grader
     # workbooks go in grading_output, which is safe to delete and regenerate.
     master = save_distributed_graders(allocation, A.folder_path, overwrite=True)
@@ -188,7 +189,7 @@ def save_the_grader_sheets(A, GRADERS, allocation):
 
 
 @app.cell
-def distribute_the_feedback_sheets(A):
+def cw1_distribute_the_feedback_sheets(A):
     # A copy of the blank rubric into every student's folder, named for their
     # id. Existing sheets are skipped, never overwritten -- they may already
     # carry marks.
@@ -199,7 +200,7 @@ def distribute_the_feedback_sheets(A):
 
 
 @app.cell
-def alphabetise_the_folders(A, cl):
+def cw1_alphabetise_the_folders(A, cl):
     # Brightspace format -> UL format:
     #   "27236-46025 - 23304308 Angood - 05 March 2026 612 PM"
     #                       becomes
@@ -215,7 +216,7 @@ def alphabetise_the_folders(A, cl):
 
 
 @app.cell
-def graders_complete_the_feedback_sheets(A):
+def cw1_graders_complete_the_feedback_sheets(A):
     """GRADER — marks each allocated student's feedback sheet."""
     # A real feedback sheet CALCULATES the grade cell from the rubric rows
     # above it; the grader fills those in and the total falls out. These
@@ -235,7 +236,7 @@ def graders_complete_the_feedback_sheets(A):
 
 
 @app.cell
-def graders_copy_marks_to_their_grade_sheets(A, GRADERS):
+def cw1_graders_copy_marks_to_their_grade_sheets(A, GRADERS):
     """GRADER — copies each calculated mark into their own grade sheet.
 
     This is the transcription step, and the reason the reconciliation below
@@ -276,7 +277,7 @@ def graders_copy_marks_to_their_grade_sheets(A, GRADERS):
 
 
 @app.cell
-def leader_reads_the_feedback_sheets(A):
+def cw1_leader_reads_the_feedback_sheets(A):
     """MODULE LEADER — what the students actually received."""
     # Walks the submissions tree, opens every feedback sheet, reads the grade
     # cell. Student id comes from the filename, not the folder.
@@ -287,7 +288,7 @@ def leader_reads_the_feedback_sheets(A):
 
 
 @app.cell
-def leader_collates_the_grade_sheets(A, GRADERS):
+def cw1_leader_collates_the_grade_sheets(A, GRADERS):
     """MODULE LEADER — every grader's sheet into one collated file.
 
     The result is a filled-in `distributed.xlsx`: the same allocation, with
@@ -313,7 +314,7 @@ def leader_collates_the_grade_sheets(A, GRADERS):
 
 
 @app.cell
-def reconcile_the_two_records(completed, grades):
+def cw1_reconcile_the_two_records(completed, grades):
     """MODULE LEADER — does the student's number match the recorded one?
 
     The student receives the feedback sheet; the department receives the
@@ -350,7 +351,7 @@ def reconcile_the_two_records(completed, grades):
 
 
 @app.cell
-def rename_for_reupload(A, rename_log):
+def cw1_rename_for_reupload(A, rename_log):
     # UL format back to Brightspace format, so the folders can be re-uploaded.
     # This is the least tested part of the package -- check its output.
     #
@@ -383,19 +384,259 @@ def rename_for_reupload(A, rename_log):
 
 
 @app.cell
-def record_progress(HANDLE):
+def cw1_record_progress(HANDLE):
     # Write what has been done back into module.toml. Comments and layout
     # survive; only the [status] section changes.
     HANDLE.set_status(
-        ASSESSMENT_ID,
+        ASSESSMENT_1_ID,
         graders_allocated=True,
         sheets_distributed=True,
         grades_collected=True,
     )
 
-    status = ModuleFile.load(ROOT).module.assessment(ASSESSMENT_ID).status
+    status = ModuleFile.load(ROOT).module.assessment(ASSESSMENT_1_ID).status
     status.model_dump()
     return
+
+
+# ===========================================================================
+# Coursework 2
+#
+# The same seven steps against a second assessment. Every cell name and every
+# local is suffixed `2`, because marimo allows a name to be defined in only
+# one cell -- `sheet`, `grader`, `student_id` and friends are all taken by the
+# cells above.
+#
+# Duplicating the block works, but it does not scale: a third assessment
+# means a third copy. See the note at the end of the file.
+# ===========================================================================
+
+
+@app.cell
+def cw2_pick_the_assessment(MODULE):
+    A2 = MODULE.assessment(ASSESSMENT_2_ID)
+    GRADERS2 = [person.initials for person in A2.graders]
+
+    mo.md(f"""
+    ### {A2.name} (`{A2.id}`)
+
+    Marked out of {A2.marks_out_of}, worth {A2.weight}. Graders: `{GRADERS2}`.
+    Mark lives in cell `{A2.grade_cell}` of each feedback sheet.
+
+    | | |
+    |---|---|
+    | folder | `{A2.folder_path}` |
+    | submissions | `{A2.submissions_path}` |
+    | grading output | `{A2.grading_output_path}` |
+    | rubric | `{A2.rubric_path}` |
+    """)
+    return A2, GRADERS2
+
+
+@app.cell
+def cw2_check_for_resubmissions(A2):
+    repeated2 = scan_multiple_subs(A2.submissions_path)
+
+    mo.md(
+        f"**{len(repeated2)} student(s) submitted more than once:** "
+        f"`{sorted(repeated2)}`"
+        if repeated2
+        else "**No resubmissions.** Safe to alphabetise."
+    )
+    return (repeated2,)
+
+
+@app.cell
+def cw2_resolve_resubmissions(A2, repeated2):
+    for student_id2 in repeated2:
+        folders2 = sorted(
+            p for p in A2.submissions_path.iterdir()
+            if p.is_dir() and student_id2 in p.name
+        )
+        for extra2 in folders2[1:]:
+            for f2 in extra2.rglob("*"):
+                if f2.is_file():
+                    f2.unlink()
+            for d2 in sorted(extra2.rglob("*"), reverse=True):
+                d2.rmdir()
+            extra2.rmdir()
+
+    resolved2 = scan_multiple_subs(A2.submissions_path)
+    mo.md(f"Remaining resubmissions: `{sorted(resolved2)}`")
+    return
+
+
+@app.cell
+def cw2_distribute_graders(cl, GRADERS2):
+    # A fresh allocation. Who marks cw2 is independent of who marked cw1.
+    allocation2 = assign_graders_individual(cl, GRADERS2, overwrite=True)
+
+    allocation2["grader"].value_counts()
+    return (allocation2,)
+
+
+@app.cell
+def cw2_save_the_grader_sheets(A2, GRADERS2, allocation2):
+    master2 = save_distributed_graders(allocation2, A2.folder_path, overwrite=True)
+    workbooks2 = save_grader_sheets(
+        allocation2,
+        A2.grading_output_path,
+        GRADERS2,
+        criteria=["Mark"],
+        overwrite=True,
+    )
+
+    mo.md(f"""
+    - master: `{master2.name}` at the assessment root
+    - workbooks: `{[p.name for p in workbooks2.values()]}` in `grading_output/`
+    """)
+    return
+
+
+@app.cell
+def cw2_distribute_the_feedback_sheets(A2):
+    # A2.rubric_path, not A.rubric_path -- each assessment has its own blank
+    # sheet, and cw2's rubric lives in cw2's folder.
+    distribution2 = distribute_feedback_sheets(A2.submissions_path, A2.rubric_path)
+
+    mo.md(f"**{distribution2}** — unrecognised: `{distribution2.unmatched}`")
+    return
+
+
+@app.cell
+def cw2_alphabetise_the_folders(A2, cl):
+    alphabetise_folders(cl, A2.submissions_path)
+
+    rename_log2 = pd.read_csv(A2.submissions_path / "folder_rename_log.csv")
+    rename_log2
+    return (rename_log2,)
+
+
+@app.cell
+def cw2_graders_complete_the_feedback_sheets(A2):
+    """GRADER — marks each allocated student's feedback sheet."""
+    # Delete this cell when running for real. The graders do this.
+    marked2 = 0
+    for sheet2 in sorted(A2.submissions_path.glob("*/Feedback sheet *.xlsx")):
+        workbook2 = load_workbook(sheet2)
+        workbook2.active[A2.grade_cell] = 45 + (marked2 * 5) % 50
+        workbook2.save(sheet2)
+        marked2 += 1
+
+    mo.md(f"Marked **{marked2}** feedback sheets (cell `{A2.grade_cell}`).")
+    return
+
+
+@app.cell
+def cw2_graders_copy_marks_to_their_grade_sheets(A2, GRADERS2):
+    """GRADER — copies each calculated mark into their own grade sheet."""
+    transcribed2 = {}
+
+    sheets2 = {
+        found2.stem.split(" ")[-1]: found2
+        for found2 in A2.submissions_path.glob("*/Feedback sheet *.xlsx")
+    }
+
+    for grader2 in GRADERS2:
+        grader_file2 = A2.grading_output_path / f"{grader2}.xlsx"
+        allocated2 = pd.read_excel(grader_file2, dtype={"Student ID": str})
+
+        marks2 = []
+        for allocated_id2 in allocated2["Student ID"]:
+            their_sheet2 = sheets2.get(allocated_id2)
+            result2 = (
+                extract_studentid_grade(their_sheet2, A2.grade_cell)
+                if their_sheet2
+                else None
+            )
+            marks2.append(result2[1] if result2 else None)
+
+        allocated2["Mark"] = marks2
+        allocated2.to_excel(grader_file2, index=False)
+        transcribed2[grader2] = int(allocated2["Mark"].notna().sum())
+
+    mo.md(f"Marks copied into each grade sheet: `{transcribed2}`")
+    return
+
+
+@app.cell
+def cw2_leader_reads_the_feedback_sheets(A2):
+    """MODULE LEADER — what the students actually received."""
+    grades2 = catch_grades(A2.submissions_path, A2.grade_cell)
+
+    grades2
+    return (grades2,)
+
+
+@app.cell
+def cw2_leader_collates_the_grade_sheets(A2, GRADERS2):
+    """MODULE LEADER — every grader's sheet into one collated file."""
+    completed2 = ingest_completed_graderfiles(
+        A2.grading_output_path,
+        GRADERS2,
+        file_type="excel",
+        save=True,
+        overwrite=True,
+    )
+
+    completed2
+    return (completed2,)
+
+
+@app.cell
+def cw2_reconcile_the_two_records(completed2, grades2):
+    """MODULE LEADER — does the student's number match the recorded one?"""
+    comparison2 = grades2.merge(
+        completed2[["Student ID", "Mark"]], on="Student ID", how="outer",
+        indicator=True,
+    )
+    disagreements2 = comparison2[
+        (comparison2["_merge"] != "both")
+        | (comparison2["grade"] != comparison2["Mark"])
+    ]
+
+    mo.md(
+        f"**{len(comparison2)}** students compared, "
+        f"**{len(disagreements2)}** disagreements."
+        + ("\n\nEvery mark the students received matches the collated file."
+           if disagreements2.empty else "")
+    )
+    return (disagreements2,)
+
+
+@app.cell
+def cw2_rename_for_reupload(A2, rename_log2):
+    # Same known defect as cw1: the restored names come back upper-cased.
+    brightspace_name_folders(rename_log2.copy(), A2.submissions_path)
+
+    restored2 = sorted(p.name for p in A2.submissions_path.iterdir() if p.is_dir())
+    changed2 = sum(
+        1 for original2, now2 in zip(sorted(rename_log2["Original Name"]), restored2)
+        if original2 != now2
+    )
+
+    mo.md(
+        "Folders now look like:\n\n```\n"
+        + "\n".join(restored2[:5])
+        + f"\n```\n\n**{changed2} differ from the names Brightspace gave.**"
+    )
+    return
+
+
+@app.cell
+def cw2_record_progress(HANDLE):
+    HANDLE.set_status(
+        ASSESSMENT_2_ID,
+        graders_allocated=True,
+        sheets_distributed=True,
+        grades_collected=True,
+    )
+
+    # Read back the assessment we just wrote, not the other one.
+    status2 = ModuleFile.load(ROOT).module.assessment(ASSESSMENT_2_ID).status
+    status2.model_dump()
+    return
+
 
 
 if __name__ == "__main__":
