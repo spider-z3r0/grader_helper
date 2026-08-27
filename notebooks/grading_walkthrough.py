@@ -19,6 +19,7 @@ with app.setup():
         catch_grades,
         distribute_feedback_sheets,
         import_brightspace_classlist,
+        ingest_completed_graderfiles,
         save_distributed_graders,
         save_grader_sheets,
         scan_multiple_subs,
@@ -222,6 +223,91 @@ def catch_the_grades(A):
 
     grades
     return (grades,)
+
+
+@app.cell
+def transcribe_into_the_grader_workbooks(A, GRADERS, grades):
+    # There are two routes to a single sheet of grades, and this is the second.
+    #
+    #   feedback sheets  -> catch_grades                  (above)
+    #   grader workbooks -> ingest_completed_graderfiles  (below)
+    #
+    # A grader does one or the other: marks each student's feedback sheet, or
+    # fills in the Mark column of their own workbook. Here the marks caught
+    # above are transcribed into the workbooks, which is what a grader doing
+    # both would do -- and it makes the cross-check below meaningful.
+    #
+    # Delete this cell when running for real; the graders fill these in.
+    caught = dict(zip(grades["Student ID"], grades["grade"]))
+
+    for grader in GRADERS:
+        grader_file = A.grading_output_path / f"{grader}.xlsx"
+        allocated = pd.read_excel(grader_file, dtype={"Student ID": str})
+        allocated["Mark"] = allocated["Student ID"].map(caught)
+        allocated.to_excel(grader_file, index=False)
+
+    mo.md(
+        f"Transcribed **{len(caught)}** marks into "
+        f"`{[f'{g}.xlsx' for g in GRADERS]}`."
+    )
+    return
+
+
+@app.cell
+def ingest_the_grader_files(A, GRADERS):
+    # Every grader's workbook, concatenated into one frame, and written to
+    # grading_output/completed_grades.xlsx.
+    #
+    # require_all=True (the default) refuses if any grader has not returned
+    # their file -- missing files mean missing marks. Pass require_all=False
+    # to proceed with whoever has, and it warns about the rest.
+    #
+    # Student id columns are read as text. Left to pandas they come back as
+    # int64, which drops leading zeros and makes the result unmergeable with
+    # the class list.
+    completed = ingest_completed_graderfiles(
+        A.grading_output_path,
+        GRADERS,
+        file_type="excel",
+        save=True,
+        overwrite=True,
+    )
+
+    completed
+    return (completed,)
+
+
+@app.cell
+def cross_check_the_two_routes(completed, grades):
+    # Do the feedback sheets and the grader workbooks agree?
+    #
+    # This is worth running for real. It catches transcription slips, and it
+    # proves the ids survived the Excel round trip -- a merge between an
+    # object column and an int64 one does not fail quietly, it raises.
+    #
+    # Not every disagreement is a fault. A student who never submitted is
+    # allocated a grader from the class list, so they appear in the workbook
+    # (`right_only`) but have no feedback sheet to read a mark from. Look at
+    # `_merge` before assuming something went wrong:
+    #
+    #   right_only  in the workbooks, not in the submissions -- no submission
+    #   left_only   marked, but nobody was allocated them -- worth a look
+    #   both, differing marks  a transcription slip
+    comparison = grades.merge(
+        completed[["Student ID", "Mark"]], on="Student ID", how="outer",
+        indicator=True,
+    )
+    disagreements = comparison[
+        (comparison["_merge"] != "both") | (comparison["grade"] != comparison["Mark"])
+    ]
+
+    mo.md(
+        f"**{len(comparison)}** students compared, "
+        f"**{len(disagreements)}** disagreements."
+        + ("\n\nAll marks match across both routes."
+           if disagreements.empty else "")
+    )
+    return (disagreements,)
 
 
 @app.cell
