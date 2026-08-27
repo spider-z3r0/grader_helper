@@ -169,11 +169,12 @@ work.
 
 ```python
 import pathlib as pl        # pl is pathlib
-import polars as pr         # pr is polars (not yet in use)
+import polars as pr         # pr is polars
 ```
 
 House convention, non-negotiable. Note it inverts the usual polars idiom, so
-public docstrings should show the import line.
+public docstrings should show the import line. In use since quiz collection,
+which is the first module written in polars.
 
 ## Sources of truth
 
@@ -280,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 276 tests:
+Done, 331 tests:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -298,6 +299,8 @@ Done, 276 tests:
 - The assessment folder layout is modelled — see below
 - The four Excel-writing functions covered and repaired — see below
 - A whole fake module on disk, and an end-to-end test over it
+- Quiz collection: a folder of Brightspace quiz exports folded into one
+  mark -- see below. The first polars in the package
 
 ### The rewire onto `Module`
 
@@ -373,8 +376,12 @@ checked by exactly the path that reads it back.
 The route to a module a leader can run end to end, in order. Each step
 assumes the one before it works.
 
-1. **Quiz / MCQ collection** — Kev has separate code for this. The one
-   assessment type the walkthrough does not yet drive.
+1. ~~**Quiz / MCQ collection**~~ — done; see **Quiz collection**. Two
+   loose ends left deliberately: the policy numbers (`pass_mark`,
+   `free_passes`) are arguments at the call site rather than `module.toml`
+   fields, so a module does not yet *record* its own quiz rules; and the
+   walkthrough still does not drive a quiz, because `fake_module` builds no
+   quiz exports.
 2. **Write everything to the departmental grade file** — the pieces exist
    (`prepare_data_for_departmental_template` is golden-tested); what is
    missing is getting a whole module's collated marks into the actual
@@ -406,6 +413,61 @@ cw1 and cw2 written out in full rather than driven by a selector. That is the
 point while the process is still being stepped through and checked -- every
 value visible, nothing hidden behind a widget. Convenience features belong in
 step 6, not before.
+
+### Quiz collection
+
+Brightspace exports **one CSV per quiz**, so collecting a term of them is a
+fold rather than a read: `collect_quiz_marks` joins the exports on the
+student id, counts the passes, and returns one column named by the
+assessment — `Quizzes (10)` falls out of the two-numbers rule, it is not
+spelled anywhere.
+
+Three of the decisions in it are policy rather than arithmetic, and all
+three are the module leader's:
+
+- **`pass_mark`.** A quiz is passed when its percentage is **strictly
+  above** the mark. At 80.0 a student who scored exactly 80% has failed.
+  That is the rule as stated for the module this was written for, and it is
+  a parameter precisely because no other module has to share it.
+- **`free_passes`.** *n* quizzes may be failed without losing a mark: added
+  to the count, then **capped at `marks_out_of`**. Worth being clear that
+  this is not the same as dropping the worst quiz — it lifts everyone by
+  *n*, where dropping the worst only helps those near the top. Eleven
+  quizzes, ten marks, one free pass is the shape it was written for.
+- **The non-participant.** The free pass is **not** given to a student who
+  sat no quiz at all. The departmental sheet awards NG where the module
+  total is zero and excludes it from the average QPV, so handing a ghost
+  student 1% quietly converts their NG into an F. Two routes reach that
+  student and both are closed: absent from every export (the class list
+  supplies the 0), and present with an empty `%` — opened the quiz, never
+  submitted (the `sat_any` check).
+
+**No rounding here.** The percentage is compared as Brightspace reports it.
+Rounding *up* to the boundary would promote a fail to a pass, which invents
+a mark rather than reading one. `excel_round` belongs where totals are
+formed for the sheet, not where a threshold is tested.
+
+**The `#`, again.** The quiz export writes `Username` as `#56170559`,
+exactly as the class list does. Left on, the join against the class list
+does not fail — it matches nothing, and every student comes back twice with
+half their row empty. Same trap, second location.
+
+**Every column is read as text** (`infer_schema_length=0`), for the leading
+zero. Only one test reaches that guard: an export whose username carries the
+`#` is inferred as text anyway, so the flag is only load-bearing where the
+id arrives as a bare number.
+
+**Two refusals**, both because the alternative is awarding a mark nobody
+chose: more than one row for a student in one export (multiple attempts —
+which one counts is a rule about the module), and more than one export named
+for the same quiz (which would count it twice for everybody).
+
+**polars is now a runtime dependency**, and this is the first module to use
+it — the wedge for the migration rather than a port of what already works.
+The fold is polars throughout; the return is pandas, because that is what
+the rest of the pipeline reads. The conversion goes through Python lists
+rather than `to_pandas()`, which would pull in pyarrow for a frame of a few
+hundred rows.
 
 ### The Excel round trip
 
@@ -619,6 +681,10 @@ Two things the walkthrough surfaced, neither a bug:
 - **No moderation pack.** `Assessment.status.moderated` and
   `Module.internal_moderator` exist, but nothing samples submissions or
   stratifies them by letter grade. A feature to build, not a gap to cover.
+- **Quiz rules are not recorded.** `pass_mark` and `free_passes` are
+  arguments to `collect_quiz_marks`, not fields on `Assessment`, so a
+  module's own quiz policy lives in whatever script calls it. Fields
+  next, which is a `module.toml` round-trip change.
 - A `.pyc` is tracked despite `.gitignore` listing `__pycache__/`. Ignore
   rules do not apply to already-tracked files: `git rm --cached` it.
 

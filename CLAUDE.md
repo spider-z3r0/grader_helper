@@ -21,7 +21,7 @@ wasted here.
 
 ```python
 import pathlib as pl        # pl is pathlib
-import polars as pr         # pr is polars (not yet in use)
+import polars as pr         # pr is polars
 ```
 
 House convention, and it inverts the usual polars idiom, so public docstrings
@@ -46,6 +46,7 @@ should show the import line.
 | `module.toml`, models, paths | **module.toml**, **The assessment folder layout** |
 | Brightspace folder names | **Sources of truth → Brightspace formats** |
 | the Excel read/write functions | **The Excel round trip** |
+| quizzes, pass marks, free passes | **Quiz collection** |
 | what to build next | **Next** |
 | something looks broken | **Known gaps** — it may be known |
 

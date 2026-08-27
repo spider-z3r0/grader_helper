@@ -22,6 +22,12 @@ from .models import (
 from .ingesting.load_graders import load_graders
 from .ingesting.import_brightspace_classlist import import_brightspace_classlist
 from .ingesting.ingest_completed_graderfiles import ingest_completed_graderfiles
+from .ingesting.collect_quiz_marks import (
+    DuplicateAttemptError,
+    collect_quiz_marks,
+    quiz_name,
+    read_quiz,
+)
 
 # grader assignment
 from .assignment.assign_graders_individual import assign_graders_individual
@@ -72,6 +78,10 @@ __all__ = [
     "save_distributed_graders",
     "save_grader_sheets",
     "ingest_completed_graderfiles",
+    "collect_quiz_marks",
+    "read_quiz",
+    "quiz_name",
+    "DuplicateAttemptError",
     "extract_studentid_grade",
     "catch_grades",
     "excel_round",
