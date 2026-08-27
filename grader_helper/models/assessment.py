@@ -112,6 +112,29 @@ class Assessment(BaseModel):
     )
     due_date: str | None = None
 
+    # --------------------------------------------------------- quiz policy
+    #
+    # Flat scalars rather than a [assessment.quiz] sub-table, deliberately.
+    # The file writer's one real hazard is that a scalar written after a
+    # sub-table is parsed *into* that sub-table -- see the comment in
+    # init_module about where [module.leader] has to go -- and flat keys
+    # cannot trip it.
+    pass_mark: float | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="Percentage a single quiz must exceed to count as passed. "
+        "Strictly above: at 80 a score of exactly 80 has failed. 0 is "
+        "meaningful and legal -- it means any score above nothing passes, "
+        "i.e. the quiz is an engagement mark.",
+    )
+    free_passes: int = Field(
+        default=0,
+        ge=0,
+        description="Quizzes a student may fail without losing a mark. Added "
+        "to the count of passes, then capped at marks_out_of.",
+    )
+
     status: AssessmentStatus = Field(default_factory=AssessmentStatus)
 
     #: Where ``paths.assessments`` resolves to, pushed down by Module on load.
@@ -152,6 +175,55 @@ class Assessment(BaseModel):
                 f"Assessment {self.id!r} lists the same grader more than once: "
                 f"{sorted(duplicates)}. Grader initials must be unique, because "
                 "each grader gets one workbook named for them."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _quiz_policy_belongs_to_a_quiz(self) -> Self:
+        """`pass_mark` and `free_passes` only mean something for a quiz.
+
+        On a coursework a "pass mark" reads as a compensation threshold,
+        which is a different thing entirely and is not what this package
+        would do with it. Refusing is cheaper than the conversation about
+        why a coursework's pass mark had no effect.
+        """
+        collected = (AssessmentType.QUIZ, AssessmentType.MCQ)
+        if self.type in collected:
+            return self
+
+        set_here = [
+            name
+            for name, value in (
+                ("pass_mark", self.pass_mark),
+                ("free_passes", self.free_passes or None),
+            )
+            if value is not None
+        ]
+        if set_here:
+            raise ValueError(
+                f"Assessment {self.id!r} is a {self.type.value} but sets "
+                f"{set_here}. Those describe how a mark is collected from "
+                "Brightspace quiz exports, so they belong to an assessment "
+                f"of type {[t.value for t in collected]}. A pass mark on a "
+                "coursework is a compensation threshold, which this package "
+                "does not implement."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _free_passes_leave_something_to_earn(self) -> Self:
+        """Forgiving as many quizzes as there are marks awards them all.
+
+        Every student takes full marks without sitting anything, and the
+        result is a plausible number rather than an error -- which is the
+        failure mode this package spends most of its guards on.
+        """
+        if self.free_passes and self.free_passes >= self.marks_out_of:
+            raise ValueError(
+                f"Assessment {self.id!r} gives {self.free_passes} free "
+                f"pass(es) but is marked out of {self.marks_out_of}, so "
+                "every student would take full marks without passing a "
+                "single quiz. free_passes must be fewer than marks_out_of."
             )
         return self
 

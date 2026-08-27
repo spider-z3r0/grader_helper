@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 331 tests:
+Done, 356 tests:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -300,7 +300,8 @@ Done, 331 tests:
 - The four Excel-writing functions covered and repaired — see below
 - A whole fake module on disk, and an end-to-end test over it
 - Quiz collection: a folder of Brightspace quiz exports folded into one
-  mark -- see below. The first polars in the package
+  mark, with the rules recorded in `module.toml` -- see below. The first
+  polars in the package
 
 ### The rewire onto `Module`
 
@@ -376,12 +377,11 @@ checked by exactly the path that reads it back.
 The route to a module a leader can run end to end, in order. Each step
 assumes the one before it works.
 
-1. ~~**Quiz / MCQ collection**~~ — done; see **Quiz collection**. Two
-   loose ends left deliberately: the policy numbers (`pass_mark`,
-   `free_passes`) are arguments at the call site rather than `module.toml`
-   fields, so a module does not yet *record* its own quiz rules; and the
-   walkthrough still does not drive a quiz, because `fake_module` builds no
-   quiz exports.
+1. ~~**Quiz / MCQ collection**~~ — done, and the rules are recorded in
+   `module.toml`; see **Quiz collection**. One loose end left: the
+   walkthrough still does not drive a quiz. The fixture it needs now exists
+   (`make_fake_module(..., quizzes=True)`), so this is a notebook change
+   rather than a library one.
 2. **Write everything to the departmental grade file** — the pieces exist
    (`prepare_data_for_departmental_template` is golden-tested); what is
    missing is getting a whole module's collated marks into the actual
@@ -461,6 +461,58 @@ id arrives as a bare number.
 chose: more than one row for a student in one export (multiple attempts —
 which one counts is a rule about the module), and more than one export named
 for the same quiz (which would count it twice for everybody).
+
+#### The rules live in `module.toml`
+
+`pass_mark` and `free_passes` are fields on `Assessment`, so a module
+records how its own quizzes are collected rather than leaving it to whatever
+script happens to call the function. There is **no default pass mark**:
+with neither the assessment nor the caller supplying one,
+`collect_quiz_marks` raises. A threshold nobody chose is exactly the kind of
+invisible policy that produces a plausible wrong mark, and no module has to
+share another's.
+
+Three decisions inside that:
+
+- **Flat scalars, not a `[assessment.quiz]` sub-table.** The file writer's
+  one real hazard is that a scalar written after a sub-table is parsed *into*
+  that sub-table — the reason `init_module` writes every person's scalars
+  before opening `[module.leader]`. Flat keys cannot trip it.
+- **`pass_mark` is not required at load time.** Requiring it would stop an
+  existing `module.toml` opening at all, which is a heavy price for a rule
+  only needed at the moment marks are collected. It is enforced there.
+- **`pass_mark = 0` is legal and meaningful.** With the strictly-above rule
+  it means any score above nothing passes: the quiz is an engagement mark.
+  So the check is `ge=0`, not `gt=0`.
+
+Two validators refuse configurations that would otherwise produce plausible
+output: quiz rules on a coursework or exam (there a "pass mark" reads as a
+compensation threshold, which is a different thing this package does not
+implement), and `free_passes >= marks_out_of`, which awards every student
+full marks without a quiz being sat.
+
+Adding the fields could not disturb an existing file, and the reason is
+worth knowing: `ModuleFile.save` syncs the author's sections with
+`add_missing=False`, so a key absent from the document stays absent.
+`free_passes = 0` on the model is never written into a file that lacks it.
+
+#### The fixture
+
+`make_fake_module(..., quizzes=True)` replaces the MCQ with eleven weekly
+quizzes — same id slot, same two numbers, same weight — so the weights still
+sum to 100 and every total in `expected` is unchanged. Replacing rather than
+adding is what keeps the coursework path and the golden data out of it
+entirely. It is off by default, so the module every other test sees is the
+module it saw before.
+
+The exports are generated **backwards from the mark each student should
+end up with**, which is what makes the fixture assert something rather than
+merely exist. With one free pass the mark is `min(passes + 1, 10)`, so a
+target of *v* means passing *v* − 1 and failing the rest; a target of 10 is
+nine passes and the cap; a target of 0 is a student who appears in no export
+at all. That last one is Jack Joyce, who is already the cohort's "scored 0
+throughout → NG, not F" case, so the NG guard is exercised by the fixture's
+own logic rather than by a special case bolted on.
 
 **polars is now a runtime dependency**, and this is the first module to use
 it — the wedge for the migration rather than a port of what already works.
@@ -657,6 +709,11 @@ It runs as a pytest fixture (`fake_module`), and standalone for a notebook:
 python tests/fake_module.py ~/scratch/PS4001
 ```
 
+`quizzes=True` swaps the MCQ for eleven weekly quizzes and their exports —
+see **Quiz collection → The fixture** for how the exports are generated and
+why the swap costs the coursework path nothing. Off by default, so
+`fake_module` is unchanged.
+
 Two things the walkthrough surfaced, neither a bug:
 
 - **A non-submitter and a student who scored zero are indistinguishable on
@@ -681,10 +738,6 @@ Two things the walkthrough surfaced, neither a bug:
 - **No moderation pack.** `Assessment.status.moderated` and
   `Module.internal_moderator` exist, but nothing samples submissions or
   stratifies them by letter grade. A feature to build, not a gap to cover.
-- **Quiz rules are not recorded.** `pass_mark` and `free_passes` are
-  arguments to `collect_quiz_marks`, not fields on `Assessment`, so a
-  module's own quiz policy lives in whatever script calls it. Fields
-  next, which is a `module.toml` round-trip change.
 - A `.pyc` is tracked despite `.gitignore` listing `__pycache__/`. Ignore
   rules do not apply to already-tracked files: `git rm --cached` it.
 

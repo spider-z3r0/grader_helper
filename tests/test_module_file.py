@@ -61,6 +61,8 @@ type = "quiz"
 name = "Quizzes"
 marks_out_of = 10
 weight = 10
+pass_mark = 80.0        # strictly above: exactly 80 has failed
+free_passes = 1         # eleven quizzes are set, so one may be dropped
 """
 
 
@@ -113,6 +115,34 @@ def test_grade_sheet_columns_come_from_the_file(module_dir):
         "Coursework 2 (50)",
         "Quizzes (10)",
     ]
+
+
+def test_quiz_rules_are_read_from_the_file(module_dir):
+    """The module records how its quizzes are collected, not the script."""
+    quizzes = load_module(module_dir).assessment("quizzes")
+
+    assert quizzes.pass_mark == 80.0
+    assert quizzes.free_passes == 1
+
+
+def test_a_quiz_without_rules_still_loads(module_dir):
+    """Files written before the keys existed must keep loading.
+
+    Requiring pass_mark at load time would stop an existing module.toml
+    opening at all, which is a heavy price for a rule that is only needed
+    at the moment marks are collected. It is enforced there instead.
+    """
+    path = module_dir / MODULE_FILENAME
+    path.write_text(
+        EXAMPLE.replace("pass_mark = 80.0        # strictly above: exactly 80 has failed\n", "")
+        .replace("free_passes = 1         # eleven quizzes are set, so one may be dropped\n", ""),
+        encoding="utf-8",
+    )
+
+    quizzes = load_module(module_dir).assessment("quizzes")
+
+    assert quizzes.pass_mark is None
+    assert quizzes.free_passes == 0
 
 
 def test_graders_read_from_shorthand(module_dir):

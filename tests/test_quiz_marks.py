@@ -9,7 +9,7 @@ The fixtures here write exports in the shape Brightspace actually produces,
 because two of the defects these tests exist to catch live entirely in that
 shape: the ``#`` on the username, and the leading space in the ``" %"``
 column name. A tidied-up fixture would pass against code that handles
-neither.
+neither. That shape is defined once, in ``fake_module.write_quiz``.
 """
 
 import pathlib as pl
@@ -19,6 +19,9 @@ import polars as pr
 import pytest
 
 from conftest import make_assessment
+# write_quiz lives beside the submission-folder builder, so there is one
+# definition of what a Brightspace export looks like rather than two.
+from fake_module import write_quiz
 from grader_helper.ingesting import (
     DuplicateAttemptError,
     collect_quiz_marks,
@@ -26,53 +29,21 @@ from grader_helper.ingesting import (
     read_quiz,
 )
 
-#: A quiz export's header, as downloaded. The username carries a '#', the
-#: percentage column's name begins with a space, and there are columns we do
-#: not want -- all three are real, and all three are the point.
-EXPORT_COLUMNS = (
-    "Org Defined ID",
-    "Username",
-    "LastName",
-    "FirstName",
-    "Attempt #",
-    "Score",
-    "Out Of",
-    " %",
-)
-
-
-def write_quiz(folder: pl.Path, quiz: str, scores: dict[str, float]) -> pl.Path:
-    """Write one Brightspace quiz export.
-
-    `scores` maps student id (bare digits, as the class list holds them) to
-    the percentage they scored. A student absent from it did not sit this
-    quiz and so has no row, which is how Brightspace exports it. A score of
-    None writes the row with an empty percentage -- opened the quiz, never
-    submitted it.
-    """
-    path = folder / f"{quiz} - PS4001 - 12 January 2026.csv"
-    rows = [
-        {
-            "Org Defined ID": sid,
-            "Username": f"#{sid}",
-            "LastName": f"Surname{sid[-2:]}",
-            "FirstName": f"First{sid[-2:]}",
-            "Attempt #": 1,
-            "Score": "" if pct is None else pct / 10,
-            "Out Of": 10,
-            " %": "" if pct is None else f"{pct} %",
-        }
-        for sid, pct in scores.items()
-    ]
-    pd.DataFrame(rows, columns=list(EXPORT_COLUMNS)).to_csv(path, index=False)
-    return path
-
-
 @pytest.fixture
 def quiz_assessment():
-    """Eleven weekly quizzes: one assessment, out of 10, worth 10."""
+    """Eleven weekly quizzes: one assessment, out of 10, worth 10.
+
+    Carrying its own pass_mark, as it would in module.toml. Tests that want
+    a different rule override it at the call, which is also the precedence
+    being asserted further down.
+    """
     return make_assessment(
-        id="quizzes", type="quiz", name="Quizzes", marks_out_of=10, weight=10
+        id="quizzes",
+        type="quiz",
+        name="Quizzes",
+        marks_out_of=10,
+        weight=10,
+        pass_mark=80.0,
     )
 
 
@@ -410,7 +381,12 @@ def test_a_fractional_marks_out_of_is_refused(quiz_folder):
     """A count of quizzes cannot produce 7.5."""
     write_quiz(quiz_folder, "Quiz 1", {"23304301": 90.0})
     assessment = make_assessment(
-        id="quizzes", type="quiz", name="Quizzes", marks_out_of=7.5, weight=10
+        id="quizzes",
+        type="quiz",
+        name="Quizzes",
+        marks_out_of=7.5,
+        weight=10,
+        pass_mark=80.0,
     )
 
     with pytest.raises(ValueError, match="cannot be fractional"):
@@ -428,7 +404,7 @@ def test_the_column_name_comes_from_the_assessment(quiz_folder):
     """Not hardcoded. An MCQ out of 10 worth 10 is 'MCQ (10)'."""
     write_quiz(quiz_folder, "Quiz 1", {"23304301": 90.0})
     assessment = make_assessment(
-        id="mcq", type="mcq", name="MCQ", marks_out_of=10, weight=10
+        id="mcq", type="mcq", name="MCQ", marks_out_of=10, weight=10, pass_mark=80.0
     )
 
     marks = collect(quiz_folder, assessment, a_class_list("23304301"))
@@ -448,3 +424,87 @@ def test_the_folder_defaults_to_the_assessments_submissions(tmp_path, quiz_asses
     marks = collect_quiz_marks(quiz_assessment, a_class_list("23304301"))
 
     assert marks["Quizzes (10)"].tolist() == [1]
+
+
+# ---------------------------------------------------------------------------
+# Where the policy comes from
+# ---------------------------------------------------------------------------
+
+
+def test_the_pass_mark_is_taken_from_the_assessment(quiz_folder):
+    """The point of putting it in module.toml: the call does not restate it."""
+    write_quiz(quiz_folder, "Quiz 1", {"23304301": 60.0})
+    assessment = make_assessment(
+        id="quizzes",
+        type="quiz",
+        name="Quizzes",
+        marks_out_of=10,
+        weight=10,
+        pass_mark=50.0,
+    )
+
+    marks = collect(quiz_folder, assessment, a_class_list("23304301"))
+
+    assert marks["Quizzes (10)"].tolist() == [1]
+
+
+def test_the_free_passes_are_taken_from_the_assessment(quiz_folder):
+    write_quiz(quiz_folder, "Quiz 1", {"23304301": 10.0})
+    assessment = make_assessment(
+        id="quizzes",
+        type="quiz",
+        name="Quizzes",
+        marks_out_of=10,
+        weight=10,
+        pass_mark=80.0,
+        free_passes=1,
+    )
+
+    marks = collect(quiz_folder, assessment, a_class_list("23304301"))
+
+    assert marks["Quizzes (10)"].tolist() == [1]
+
+
+def test_the_argument_overrides_the_assessment(quiz_folder, quiz_assessment):
+    """A one-off -- checking what a different threshold would have done --
+    without editing the module's recorded rule."""
+    write_quiz(quiz_folder, "Quiz 1", {"23304301": 60.0})
+
+    assert collect(quiz_folder, quiz_assessment, a_class_list("23304301"))[
+        "Quizzes (10)"
+    ].tolist() == [0]
+    assert collect(
+        quiz_folder, quiz_assessment, a_class_list("23304301"), pass_mark=50.0
+    )["Quizzes (10)"].tolist() == [1]
+
+
+def test_no_pass_mark_anywhere_is_refused(quiz_folder):
+    """Not defaulted to 80. A threshold nobody chose is invisible policy."""
+    write_quiz(quiz_folder, "Quiz 1", {"23304301": 90.0})
+    assessment = make_assessment(
+        id="quizzes", type="quiz", name="Quizzes", marks_out_of=10, weight=10
+    )
+
+    with pytest.raises(ValueError, match="no pass_mark"):
+        collect(quiz_folder, assessment, a_class_list("23304301"))
+
+
+def test_a_free_pass_of_zero_is_not_mistaken_for_unset(quiz_folder):
+    """0 and None differ: an assessment that forgives nothing must not fall
+    back to anything else."""
+    write_quiz(quiz_folder, "Quiz 1", {"23304301": 10.0})
+    assessment = make_assessment(
+        id="quizzes",
+        type="quiz",
+        name="Quizzes",
+        marks_out_of=10,
+        weight=10,
+        pass_mark=80.0,
+        free_passes=3,
+    )
+
+    marks = collect(
+        quiz_folder, assessment, a_class_list("23304301"), free_passes=0
+    )
+
+    assert marks["Quizzes (10)"].tolist() == [0]

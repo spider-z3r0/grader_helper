@@ -43,6 +43,34 @@ ASSIGNMENT_ID = "27236-46025"
 #: Where the mark sits in the feedback sheet. Matches module.toml.
 GRADE_CELL = "D30"
 
+#: The quiz assessment, which REPLACES the MCQ when quizzes=True rather
+#: than joining it. Same id-shaped slot, same two numbers, same weight, so
+#: the weights still sum to 100 and every total in `expected` is unchanged
+#: -- which is what keeps the coursework path and the golden data out of
+#: this entirely.
+QUIZ_ASSESSMENT = dict(
+    id="quizzes", type="quiz", name="Quizzes", marks_out_of=10, weight=10,
+    pass_mark=80.0, free_passes=1,
+)
+
+#: How many weekly quizzes are set. Eleven for ten marks, so one may be
+#: dropped -- which is what free_passes = 1 above means.
+QUIZ_COUNT = 11
+
+#: A quiz export's header, as Brightspace downloads it. The username carries
+#: a '#', and the percentage column's name begins with a space. Both are
+#: real, and both are things the reader has to survive.
+QUIZ_EXPORT_COLUMNS = (
+    "Org Defined ID",
+    "Username",
+    "LastName",
+    "FirstName",
+    "Attempt #",
+    "Score",
+    "Out Of",
+    " %",
+)
+
 #: The module's shape, matching the 2026 departmental sample.
 ASSESSMENTS = (
     dict(id="cw1", type="coursework", name="Coursework 1",
@@ -102,6 +130,9 @@ class FakeModule(NamedTuple):
     rubrics: dict[str, pl.Path]
     #: assessment id -> where the tool writes (grader workbooks, combined grades)
     grading_output: dict[str, pl.Path]
+    #: assessment id -> the quiz exports, one file per quiz. Empty unless
+    #: the module was built with quizzes=True.
+    quiz_exports: dict[str, list]
     #: One row per student: ids, names, the mark written for each assessment,
     #: and the total and letter grade those marks should produce.
     expected: pd.DataFrame
@@ -140,6 +171,76 @@ def _write_feedback_sheet(path: pl.Path, mark=None, cell: str = GRADE_CELL) -> p
     sheet[cell] = mark
     wb.save(path)
     return path
+
+
+def write_quiz(folder: pl.Path, quiz: str, scores: dict) -> pl.Path:
+    """Write one Brightspace quiz export.
+
+    `scores` maps student id (bare digits, as the class list holds them) to
+    the percentage they scored. A student absent from it did not sit this
+    quiz and so has no row, which is how Brightspace exports it. A score of
+    None writes the row with an empty percentage -- opened the quiz, never
+    submitted it.
+
+    Lives here rather than in the test that first needed it so there is one
+    definition of what an export looks like, beside the one definition of
+    what a submission folder looks like.
+    """
+    path = folder / f"{quiz} - PS4001 - 12 January 2026.csv"
+    rows = [
+        {
+            "Org Defined ID": sid,
+            "Username": f"#{sid}",
+            "LastName": f"Surname{sid[-2:]}",
+            "FirstName": f"First{sid[-2:]}",
+            "Attempt #": 1,
+            "Score": "" if pct is None else pct / 10,
+            "Out Of": 10,
+            " %": "" if pct is None else f"{pct} %",
+        }
+        for sid, pct in scores.items()
+    ]
+    pd.DataFrame(rows, columns=list(QUIZ_EXPORT_COLUMNS)).to_csv(path, index=False)
+    return path
+
+
+def _quiz_scores(target: int, count: int = QUIZ_COUNT) -> list:
+    """The per-quiz percentages that produce a mark of exactly `target`.
+
+    Built backwards from the answer, which is what makes the fixture assert
+    something rather than merely exist. With one free pass, the mark is
+    ``min(passes + 1, marks_out_of)``, so:
+
+        target 0   sat nothing at all -- no rows anywhere, and no free pass
+        target v   passed v - 1, failed the rest
+        target 10  passed 9 of 11, and the cap does the last mark
+
+    Returns one percentage per quiz, or an empty list for a student who
+    never appears in an export.
+    """
+    if target <= 0:
+        return []
+    passes = target - 1
+    return [90.0] * passes + [10.0] * (count - passes)
+
+
+def _write_quiz_exports(folder: pl.Path, marks: dict) -> list:
+    """One export per quiz, holding every student who sat it."""
+    scores = {sid: _quiz_scores(target) for sid, target in marks.items()}
+    written = []
+    for index in range(QUIZ_COUNT):
+        written.append(
+            write_quiz(
+                folder,
+                f"Quiz {index + 1:02d}",
+                {
+                    sid: sat[index]
+                    for sid, sat in scores.items()
+                    if index < len(sat)
+                },
+            )
+        )
+    return written
 
 
 def _classlist_frame() -> pd.DataFrame:
@@ -197,6 +298,7 @@ def make_fake_module(
     distributed: bool = True,
     marked: bool = True,
     messy: bool = True,
+    quizzes: bool = False,
 ) -> FakeModule:
     """
     Write a complete fake module to ``root``.
@@ -211,6 +313,13 @@ def make_fake_module(
     messy (bool): Include the things a real download has -- a __MACOSX
         folder, a student who submitted twice, a stray index.html. Set False
         for a clean cohort.
+    quizzes (bool): Replace the MCQ with a batch of weekly quizzes --
+        eleven Brightspace exports in the assessment's submissions folder,
+        and the collection rules recorded in module.toml. Off by default,
+        so the module every other test sees is exactly the module it saw
+        before this existed. The marks work out the same either way: a
+        student's quiz mark is the mark their MCQ would have been, so
+        `expected` and the totals in it do not change.
 
     Returns:
     FakeModule: The paths, plus the expected results.
@@ -228,6 +337,13 @@ def make_fake_module(
             "a mark into until the sheets have been distributed."
         )
 
+    # The quiz takes the MCQ's slot rather than being added beside it, so
+    # the weights still sum to 100 and no total moves.
+    specs = tuple(
+        QUIZ_ASSESSMENT if quizzes and spec["id"] == "mcq" else spec
+        for spec in ASSESSMENTS
+    )
+
     # --- module.toml -------------------------------------------------------
     handle = init_module(
         root,
@@ -237,9 +353,12 @@ def make_fake_module(
         leader={"initials": "KOM", "name": "Kevin O Malley"},
         internal_moderator="SOB",
         assessments=[
-            {**spec, "folder": spec["id"], "rubric": "Feedback sheet BLANK.xlsx",
-             "grade_cell": GRADE_CELL, "graders": ["KOM", "SOB"]}
-            for spec in ASSESSMENTS
+            {**spec, "folder": spec["id"]}
+            if spec["type"] == "quiz"
+            else {**spec, "folder": spec["id"],
+                  "rubric": "Feedback sheet BLANK.xlsx",
+                  "grade_cell": GRADE_CELL, "graders": ["KOM", "SOB"]}
+            for spec in specs
         ],
         paths={"classlist": "classlist.xlsx"},
         overwrite=True,
@@ -253,18 +372,35 @@ def make_fake_module(
     marks_by_assessment = {
         "cw1": {sid: cw1 for sid, _, _, cw1, _, _ in COHORT},
         "cw2": {sid: cw2 for sid, _, _, _, cw2, _ in COHORT},
-        "mcq": {sid: mcq for sid, _, _, _, _, mcq in COHORT},
+        # The quiz mark is the mark the MCQ would have been. Same column of
+        # COHORT, same totals, so `expected` covers both shapes.
+        ("quizzes" if quizzes else "mcq"): {
+            sid: mcq for sid, _, _, _, _, mcq in COHORT
+        },
     }
 
     submissions: dict[str, pl.Path] = {}
     rubrics: dict[str, pl.Path] = {}
     grading_output: dict[str, pl.Path] = {}
+    quiz_exports: dict[str, list] = {}
 
-    for index, spec in enumerate(ASSESSMENTS):
+    for index, spec in enumerate(specs):
         # init_module has already created folder/, submissions/ and
         # grading_output/ -- ask the model where they are rather than
         # rebuilding the paths here.
         assessment = handle.module.assessment(spec["id"])
+
+        if spec["type"] == "quiz":
+            # Nobody marks a quiz: there are no submission folders and no
+            # feedback sheets, just Brightspace's own exports where the
+            # download would be.
+            subs = assessment.submissions_path
+            submissions[spec["id"]] = subs
+            grading_output[spec["id"]] = assessment.grading_output_path
+            quiz_exports[spec["id"]] = _write_quiz_exports(
+                subs, marks_by_assessment[spec["id"]]
+            )
+            continue
 
         rubrics[spec["id"]] = _write_feedback_sheet(
             assessment.rubric_path, mark=None
@@ -308,6 +444,7 @@ def make_fake_module(
         submissions=submissions,
         rubrics=rubrics,
         grading_output=grading_output,
+        quiz_exports=quiz_exports,
         expected=_expected_frame(),
         grade_cell=GRADE_CELL,
     )

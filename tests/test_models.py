@@ -103,6 +103,95 @@ def test_ten_weekly_quizzes_need_no_extra_field():
     assert a.columns == ["Quizzes (10)"]
 
 
+# ---------------------------------------------------------------------------
+# Quiz rules
+# ---------------------------------------------------------------------------
+
+
+def test_a_quiz_records_how_its_marks_are_collected():
+    """The rules live with the module, not with whatever script calls it."""
+    a = make_assessment(
+        id="quizzes",
+        type="quiz",
+        name="Quizzes",
+        marks_out_of=10,
+        weight=10,
+        pass_mark=80.0,
+        free_passes=1,
+    )
+    assert a.pass_mark == 80.0
+    assert a.free_passes == 1
+
+
+def test_a_quiz_without_rules_is_still_valid():
+    a = make_assessment(
+        id="quizzes", type="quiz", name="Quizzes", marks_out_of=10, weight=10
+    )
+    assert a.pass_mark is None
+    assert a.free_passes == 0
+
+
+def test_an_mcq_may_carry_quiz_rules():
+    """The same collection path serves both, so both accept the keys."""
+    a = make_assessment(
+        id="mcq", type="mcq", name="MCQ", marks_out_of=10, weight=10, pass_mark=50.0
+    )
+    assert a.pass_mark == 50.0
+
+
+def test_a_pass_mark_on_a_coursework_is_refused():
+    """On a coursework it reads as a compensation threshold, which is a
+    different thing and is not what this package would do with it."""
+    with pytest.raises(ValidationError, match="pass_mark"):
+        make_assessment(id="cw1", type="coursework", pass_mark=40.0)
+
+
+def test_free_passes_on_an_exam_are_refused():
+    with pytest.raises(ValidationError, match="free_passes"):
+        make_assessment(
+            id="exam", type="exam", name="Exam", marks_out_of=100, weight=100,
+            free_passes=2,
+        )
+
+
+def test_a_pass_mark_of_zero_is_allowed():
+    """Meaningful, not a mistake: with the strictly-above rule it means any
+    score above nothing passes -- the quiz is an engagement mark."""
+    a = make_assessment(
+        id="quizzes", type="quiz", name="Quizzes", marks_out_of=10, weight=10,
+        pass_mark=0,
+    )
+    assert a.pass_mark == 0
+
+
+def test_a_pass_mark_over_one_hundred_is_refused():
+    with pytest.raises(ValidationError):
+        make_assessment(
+            id="quizzes", type="quiz", name="Quizzes", marks_out_of=10, weight=10,
+            pass_mark=101,
+        )
+
+
+def test_forgiving_every_quiz_is_refused():
+    """Ten free passes on a mark out of ten awards everyone full marks
+    without a single quiz being sat, and the result is a plausible number
+    rather than an error."""
+    with pytest.raises(ValidationError, match="free_passes must be fewer"):
+        make_assessment(
+            id="quizzes", type="quiz", name="Quizzes", marks_out_of=10, weight=10,
+            pass_mark=80.0, free_passes=10,
+        )
+
+
+def test_free_passes_one_short_of_the_marks_is_allowed():
+    """The boundary: nine forgiven out of ten still leaves one to earn."""
+    a = make_assessment(
+        id="quizzes", type="quiz", name="Quizzes", marks_out_of=10, weight=10,
+        pass_mark=80.0, free_passes=9,
+    )
+    assert a.free_passes == 9
+
+
 def test_weights_render_as_integers():
     """The sheet says (40), not (40.0)."""
     assert make_assessment(weight=40.0).weighted_column == "Coursework 1 (40)"

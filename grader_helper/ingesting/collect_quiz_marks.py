@@ -228,8 +228,8 @@ def collect_quiz_marks(
     assessment: Assessment,
     class_list: pd.DataFrame,
     folder: pl.Path | None = None,
-    pass_mark: float = 80.0,
-    free_passes: int = 0,
+    pass_mark: float | None = None,
+    free_passes: int | None = None,
 ) -> pd.DataFrame:
     """Fold a folder of quiz exports into one mark per student.
 
@@ -249,10 +249,16 @@ def collect_quiz_marks(
         submissions, so no new folder is needed.
     pass_mark
         The percentage a quiz must exceed, **strictly**, to count as passed.
+        Defaults to the assessment's own ``pass_mark``, which is where it
+        belongs: the rule is the module's, and ``module.toml`` is the
+        module's memory. There is no fallback beyond that -- with neither
+        set this raises, because a threshold nobody chose is exactly the
+        kind of invisible policy that produces a plausible wrong mark.
     free_passes
         Quizzes a student may fail without losing a mark. Added to the count
         and then capped at ``marks_out_of``. Not given to a student who sat
-        no quiz at all -- see this module's docstring.
+        no quiz at all -- see this module's docstring. Defaults to the
+        assessment's own ``free_passes``, which defaults to none.
 
     Returns
     -------
@@ -268,14 +274,24 @@ def collect_quiz_marks(
         import pathlib as pl        # pl is pathlib
         import polars as pr         # pr is polars
 
+        # pass_mark = 80.0 and free_passes = 1 are recorded on the
+        # assessment in module.toml, so the call does not restate them.
         module = load_module(pl.Path("module.toml"))
-        marks = collect_quiz_marks(
-            module.assessment("quizzes"),
-            class_list,
-            pass_mark=80.0,
-            free_passes=1,
-        )
+        marks = collect_quiz_marks(module.assessment("quizzes"), class_list)
     """
+    pass_mark = pass_mark if pass_mark is not None else assessment.pass_mark
+    if pass_mark is None:
+        raise ValueError(
+            f"Assessment {assessment.id!r} has no pass_mark, so there is no "
+            "rule for what counts as passing one quiz. Add `pass_mark` to "
+            "its [[assessment]] block in module.toml -- that is where the "
+            "module records its own rules -- or pass pass_mark= for a "
+            "one-off."
+        )
+    free_passes = (
+        free_passes if free_passes is not None else assessment.free_passes
+    )
+
     if not float(assessment.marks_out_of).is_integer():
         raise ValueError(
             f"Assessment {assessment.id!r} is marked out of "

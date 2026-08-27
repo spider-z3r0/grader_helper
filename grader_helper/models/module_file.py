@@ -326,6 +326,17 @@ _ASSESSMENT_PREAMBLE = """
 # Ten weekly quizzes, each pass worth 1%, are ONE assessment marked out of 10
 # and worth 10 -- the quiz count and the marks available are the same number.
 #
+# A quiz assessment carries two more keys, because its mark is collected
+# from Brightspace's per-quiz exports rather than written on a feedback
+# sheet, and how it is collected is the module's rule:
+#
+#   pass_mark     the percentage one quiz must exceed to count as passed.
+#                 Strictly above: at 80, a score of exactly 80 has failed
+#   free_passes   quizzes that may be failed without losing a mark. Added to
+#                 the count of passes, then capped at marks_out_of
+#
+# Eleven quizzes, ten marks, free_passes = 1 is "you may drop one week".
+#
 # The weights must sum to 100. That is checked every time the file loads,
 # because weights that do not sum to 100 make every student's total wrong and
 # the error is invisible until the marks are audited.
@@ -351,6 +362,7 @@ def _render_assessment(spec: dict) -> str:
     """One [[assessment]] block, keys in a readable order."""
     ordered = [
         "id", "type", "name", "marks_out_of", "weight",
+        "pass_mark", "free_passes",
         "folder", "submissions", "grading_output",
         "rubric", "grade_cell", "graders", "group", "due_date",
     ]
