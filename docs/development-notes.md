@@ -329,6 +329,44 @@ the refusal fired before anything was written and a per-file check passed by
 luck. Moving the clash to the last grader made it a real test. Worth
 remembering that "reintroduce the bug" catches bad tests, not just bad code.
 
+### How marking actually works
+
+Worth writing down, because the code reads as though `catch_grades` and
+`ingest_completed_graderfiles` were alternatives. They are not — they are the
+two halves of one audit, run by different people.
+
+1. **Grader** fills in the feedback sheet. `grade_cell` *calculates* the
+   score from the rubric rows above it.
+2. **Grader** copies that value into their own grade sheet (`KOM.xlsx`).
+3. **Module leader** collates the grade sheets into
+   `completed_grades.xlsx` — which is just a filled-in `distributed.xlsx`:
+   the same allocation, with marks in it.
+4. **Module leader** runs `catch_grades` over the feedback sheets and
+   reconciles the two.
+
+**Step 2 is a manual copy, and that is the whole reason for step 4.** The
+student receives the feedback sheet; the department receives the collated
+file. Reconciling them is what catches a mark that was mistyped between the
+two. Running only one of `catch_grades` or `ingest_completed_graderfiles`
+gets you numbers without the control.
+
+Not every disagreement is a fault. A student who never submitted is still
+allocated a grader from the class list, so they reach the collated file but
+have no feedback sheet to read — `right_only` on the merge.
+
+`notebooks/grading_walkthrough.py` walks all four steps, labelled by who does
+each one.
+
+**Known gap in the fixture.** A real feedback sheet holds a *formula* in the
+grade cell, and `extract_studentid_grade` reads the *cached* result — which
+only Excel writes when it saves. A sheet generated programmatically and never
+opened in Excel has a formula and no cached value, so openpyxl returns None
+and it falls through to the xlwings recalculation path. The synthetic sheets
+in `tests/fake_module.py` hold literals, so **nothing in the suite exercises
+the formula path or the xlwings fallback**. Deliberately not fixed: doing so
+either breaks the Linux tests or needs a real Excel. Recorded so it is not
+rediscovered as a surprise.
+
 ### The assessment folder layout
 
 An assessment's sub-directories are now fields, so `module.toml` records the

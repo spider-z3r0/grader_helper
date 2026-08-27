@@ -18,6 +18,7 @@ with app.setup():
         assign_graders_individual,
         catch_grades,
         distribute_feedback_sheets,
+        extract_studentid_grade,
         import_brightspace_classlist,
         ingest_completed_graderfiles,
         save_distributed_graders,
@@ -44,9 +45,23 @@ def intro():
         """
         # Grading walkthrough
 
-        One assessment, from an unzipped Brightspace download to marks read
-        back out of the feedback sheets, and the folders renamed ready to go
-        back up.
+        One assessment, from an unzipped Brightspace download to a reconciled
+        set of marks and folders renamed ready to go back up.
+
+        The marking itself is a two-person process, and the last step is the
+        control that makes it trustworthy:
+
+        1. **Grader** fills in the feedback sheet — `grade_cell` calculates
+           the score
+        2. **Grader** copies that value into their own grade sheet
+           (`KOM.xlsx`)
+        3. **Module leader** collates the grade sheets into
+           `completed_grades.xlsx`, which is a filled-in `distributed.xlsx`
+        4. **Module leader** reads the feedback sheets and reconciles the two
+
+        Step 2 is a manual copy, so steps 3 and 4 exist to catch it going
+        wrong. `catch_grades` and `ingest_completed_graderfiles` are the two
+        halves of that audit, not alternatives.
 
         Run the cells in order. Each one prints what it did.
         """
@@ -200,10 +215,14 @@ def alphabetise_the_folders(A, cl):
 
 
 @app.cell
-def simulate_marking(A):
-    # Stands in for the graders doing their work. Writes a mark into the
-    # grade cell of every distributed feedback sheet. Delete this cell when
-    # running against real submissions.
+def graders_complete_the_feedback_sheets(A):
+    """GRADER — marks each allocated student's feedback sheet."""
+    # A real feedback sheet CALCULATES the grade cell from the rubric rows
+    # above it; the grader fills those in and the total falls out. These
+    # synthetic sheets hold a literal instead, so this writes the value
+    # straight in.
+    #
+    # Delete this cell when running for real. The graders do this.
     marked = 0
     for sheet in sorted(A.submissions_path.glob("*/Feedback sheet *.xlsx")):
         workbook = load_workbook(sheet)
@@ -211,12 +230,54 @@ def simulate_marking(A):
         workbook.save(sheet)
         marked += 1
 
-    mo.md(f"Wrote a mark into `{A.grade_cell}` of **{marked}** feedback sheets.")
+    mo.md(f"Marked **{marked}** feedback sheets (cell `{A.grade_cell}`).")
     return
 
 
 @app.cell
-def catch_the_grades(A):
+def graders_copy_marks_to_their_grade_sheets(A, GRADERS):
+    """GRADER — copies each calculated mark into their own grade sheet.
+
+    This is the transcription step, and the reason the reconciliation below
+    exists. In real use a grader reads the number off the feedback sheet and
+    types it into their workbook, which is exactly where a mark can go
+    astray.
+    """
+    transcribed = {}
+
+    sheets = {
+        found.stem.split(" ")[-1]: found
+        for found in A.submissions_path.glob("*/Feedback sheet *.xlsx")
+    }
+
+    for grader in GRADERS:
+        grader_file = A.grading_output_path / f"{grader}.xlsx"
+        allocated = pd.read_excel(grader_file, dtype={"Student ID": str})
+
+        marks = []
+        for allocated_id in allocated["Student ID"]:
+            their_sheet = sheets.get(allocated_id)
+            # The same reader the module leader uses below, so the two see
+            # the same value -- including the fallbacks for a sheet whose
+            # formula has not been recalculated.
+            result = (
+                extract_studentid_grade(their_sheet, A.grade_cell)
+                if their_sheet
+                else None
+            )
+            marks.append(result[1] if result else None)
+
+        allocated["Mark"] = marks
+        allocated.to_excel(grader_file, index=False)
+        transcribed[grader] = int(allocated["Mark"].notna().sum())
+
+    mo.md(f"Marks copied into each grade sheet: `{transcribed}`")
+    return
+
+
+@app.cell
+def leader_reads_the_feedback_sheets(A):
+    """MODULE LEADER — what the students actually received."""
     # Walks the submissions tree, opens every feedback sheet, reads the grade
     # cell. Student id comes from the filename, not the folder.
     grades = catch_grades(A.submissions_path, A.grade_cell)
@@ -226,38 +287,12 @@ def catch_the_grades(A):
 
 
 @app.cell
-def transcribe_into_the_grader_workbooks(A, GRADERS, grades):
-    # There are two routes to a single sheet of grades, and this is the second.
-    #
-    #   feedback sheets  -> catch_grades                  (above)
-    #   grader workbooks -> ingest_completed_graderfiles  (below)
-    #
-    # A grader does one or the other: marks each student's feedback sheet, or
-    # fills in the Mark column of their own workbook. Here the marks caught
-    # above are transcribed into the workbooks, which is what a grader doing
-    # both would do -- and it makes the cross-check below meaningful.
-    #
-    # Delete this cell when running for real; the graders fill these in.
-    caught = dict(zip(grades["Student ID"], grades["grade"]))
+def leader_collates_the_grade_sheets(A, GRADERS):
+    """MODULE LEADER — every grader's sheet into one collated file.
 
-    for grader in GRADERS:
-        grader_file = A.grading_output_path / f"{grader}.xlsx"
-        allocated = pd.read_excel(grader_file, dtype={"Student ID": str})
-        allocated["Mark"] = allocated["Student ID"].map(caught)
-        allocated.to_excel(grader_file, index=False)
-
-    mo.md(
-        f"Transcribed **{len(caught)}** marks into "
-        f"`{[f'{g}.xlsx' for g in GRADERS]}`."
-    )
-    return
-
-
-@app.cell
-def ingest_the_grader_files(A, GRADERS):
-    # Every grader's workbook, concatenated into one frame, and written to
-    # grading_output/completed_grades.xlsx.
-    #
+    The result is a filled-in `distributed.xlsx`: the same allocation, with
+    the marks in it. Written to `grading_output/completed_grades.xlsx`.
+    """
     # require_all=True (the default) refuses if any grader has not returned
     # their file -- missing files mean missing marks. Pass require_all=False
     # to proceed with whoever has, and it warns about the rest.
@@ -278,21 +313,25 @@ def ingest_the_grader_files(A, GRADERS):
 
 
 @app.cell
-def cross_check_the_two_routes(completed, grades):
-    # Do the feedback sheets and the grader workbooks agree?
-    #
-    # This is worth running for real. It catches transcription slips, and it
-    # proves the ids survived the Excel round trip -- a merge between an
-    # object column and an int64 one does not fail quietly, it raises.
+def reconcile_the_two_records(completed, grades):
+    """MODULE LEADER — does the student's number match the recorded one?
+
+    The student receives the feedback sheet; the department receives the
+    collated file. Between them sits a manual copy, so this is the check that
+    the two agree. Run it for real -- it is the point of collating and
+    catching separately.
+    """
+    # It also proves the ids survived the Excel round trip: a merge between an
+    # object column and an int64 one does not mismatch quietly, it raises.
     #
     # Not every disagreement is a fault. A student who never submitted is
-    # allocated a grader from the class list, so they appear in the workbook
-    # (`right_only`) but have no feedback sheet to read a mark from. Look at
-    # `_merge` before assuming something went wrong:
+    # allocated a grader from the class list, so they appear in the collated
+    # file (`right_only`) but have no feedback sheet to read a mark from. Look
+    # at `_merge` before assuming something went wrong:
     #
-    #   right_only  in the workbooks, not in the submissions -- no submission
+    #   right_only  collated but not submitted -- no feedback sheet exists
     #   left_only   marked, but nobody was allocated them -- worth a look
-    #   both, differing marks  a transcription slip
+    #   both, differing marks  a transcription slip at the copy step
     comparison = grades.merge(
         completed[["Student ID", "Mark"]], on="Student ID", how="outer",
         indicator=True,
@@ -304,7 +343,7 @@ def cross_check_the_two_routes(completed, grades):
     mo.md(
         f"**{len(comparison)}** students compared, "
         f"**{len(disagreements)}** disagreements."
-        + ("\n\nAll marks match across both routes."
+        + ("\n\nEvery mark the students received matches the collated file."
            if disagreements.empty else "")
     )
     return (disagreements,)
