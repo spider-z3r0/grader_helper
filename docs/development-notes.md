@@ -534,6 +534,32 @@ even when the root is a serialisable field. That test was written, seen to
 pass against the broken version, and rewritten to assert on `model_dump`
 instead.
 
+### Renaming back for re-upload
+
+`brightspace_name_folders` had no tests, and did not do what its name says:
+folders came back **upper-cased**.
+
+    27236-46025 - 23304302 Barry - 01 March 2026 600 PM     went in
+    27236-46025 - 23304302 BARRY - 01 MARCH 2026 600 PM     came back
+
+11 of 12 on the sample cohort. It upper-cased both log columns *in place* for
+case-insensitive matching, then used the upper-cased `Original Name` as the
+new folder name. **Upper case belongs in the lookup key, never in the value
+written** — those are two different things, and conflating them is the whole
+bug. Matching is still case-insensitive, so a folder whose case someone
+touched by hand still matches and is still restored properly.
+
+It now round-trips byte for byte: 0 of 12 differ. Also fixed alongside, since
+they came from the same lines: it no longer mutates the frame it is handed,
+the bare `except Exception` is narrowed to `OSError` (a rename fails for
+filesystem reasons; anything else is a bug that should surface), and it
+returns a `Restoration` rather than printing — what was renamed, what was
+already correct, what was unrecognised, what failed.
+
+The guarantee the tests hold is the round trip: what Brightspace gave us,
+`alphabetise_folders` renamed, and this hands back character for character.
+Written red first, and all seven failed against the old code.
+
 ### The fake module, and the end-to-end test
 
 `tests/fake_module.py` writes a complete module to disk: `module.toml`, a
@@ -586,18 +612,10 @@ Two things the walkthrough surfaced, neither a bug:
   appears to use `"1200 AM"`, so it may never bite. `xfail`.
 - `assignment/visualise.py` defines its function inside `main()`, so it is
   unreachable and unexported. Delete or fix; do not port.
-- **`brightspace_name_folders` has no tests at all.** It is the last step
-  before re-upload, so a failure there reaches students. It writes two CSV
-  logs as side effects, wraps the rename in a bare `except Exception`, and
-  returns nothing.
-
-  It also upper-cases `Original Name` and `Suggested Name` in place — but on
-  the *rename log*, not the class list, so this matters little. The two steps
-  hand off through a file rather than a value: `alphabetise_folders` takes the
-  class list (which it leaves alone), returns `None`, and writes
-  `folder_rename_log.csv` into the submissions folder;
-  `brightspace_name_folders` is then fed that log, read back off disk. Worth
-  knowing before looking for a return value that is not there.
+- `alphabetise_folders` returns `None` and hands off to
+  `brightspace_name_folders` through `folder_rename_log.csv` rather than
+  through a value. Worth knowing before looking for a return value that is
+  not there.
 - **No moderation pack.** `Assessment.status.moderated` and
   `Module.internal_moderator` exist, but nothing samples submissions or
   stratifies them by letter grade. A feature to build, not a gap to cover.

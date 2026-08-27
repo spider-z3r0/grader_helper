@@ -353,63 +353,22 @@ def cw1_reconcile_the_two_records(completed, grades):
 @app.cell
 def cw1_rename_for_reupload(A, rename_log):
     # UL format back to Brightspace format, so the folders can be re-uploaded.
-    # This is the least tested part of the package -- check its output.
     #
-    # It takes the rename LOG, not the class list, and mutates the frame it is
-    # given (upper-casing two columns), so hand it a copy.
-    #
-    # KNOWN DEFECT: the restored names are NOT the originals. It upper-cases
-    # `Original Name` for case-insensitive matching and then renames to that
-    # upper-cased value, so
-    #
-    #     27236-46025 - 23304302 Barry - 01 March 2026 600 PM     went in
-    #     27236-46025 - 23304302 BARRY - 01 MARCH 2026 600 PM     comes back
-    #
-    # 11 of 12 differ on the sample cohort. Compare against `rename_log` before
-    # re-uploading anything you care about.
-    brightspace_name_folders(rename_log.copy(), A.submissions_path)
+    # It takes the rename LOG, not the class list. The names come back exactly
+    # as Brightspace wrote them, case included -- matching is
+    # case-insensitive, the name written is not.
+    restoration = brightspace_name_folders(rename_log, A.submissions_path)
 
     restored = sorted(p.name for p in A.submissions_path.iterdir() if p.is_dir())
-    changed = sum(
-        1 for original, now in zip(sorted(rename_log["Original Name"]), restored)
-        if original != now
-    )
+    expected = sorted(rename_log["Original Name"])
+    exact = [name for name in expected if name in restored]
 
     mo.md(
-        "Folders now look like:\n\n```\n"
-        + "\n".join(restored[:5])
-        + f"\n```\n\n**{changed} differ from the names Brightspace gave.**"
+        f"**{restoration}**\n\n"
+        f"{len(exact)} of {len(expected)} folders restored to the exact name "
+        "Brightspace gave.\n\n```\n" + "\n".join(restored[:4]) + "\n```"
     )
     return
-
-
-@app.cell
-def cw1_record_progress(HANDLE):
-    # Write what has been done back into module.toml. Comments and layout
-    # survive; only the [status] section changes.
-    HANDLE.set_status(
-        ASSESSMENT_1_ID,
-        graders_allocated=True,
-        sheets_distributed=True,
-        grades_collected=True,
-    )
-
-    status = ModuleFile.load(ROOT).module.assessment(ASSESSMENT_1_ID).status
-    status.model_dump()
-    return
-
-
-# ===========================================================================
-# Coursework 2
-#
-# The same seven steps against a second assessment. Every cell name and every
-# local is suffixed `2`, because marimo allows a name to be defined in only
-# one cell -- `sheet`, `grader`, `student_id` and friends are all taken by the
-# cells above.
-#
-# Duplicating the block works, but it does not scale: a third assessment
-# means a third copy. See the note at the end of the file.
-# ===========================================================================
 
 
 @app.cell
@@ -606,19 +565,17 @@ def cw2_reconcile_the_two_records(completed2, grades2):
 
 @app.cell
 def cw2_rename_for_reupload(A2, rename_log2):
-    # Same known defect as cw1: the restored names come back upper-cased.
-    brightspace_name_folders(rename_log2.copy(), A2.submissions_path)
+    # As cw1: the log, not the class list, and the names come back exactly.
+    restoration2 = brightspace_name_folders(rename_log2, A2.submissions_path)
 
     restored2 = sorted(p.name for p in A2.submissions_path.iterdir() if p.is_dir())
-    changed2 = sum(
-        1 for original2, now2 in zip(sorted(rename_log2["Original Name"]), restored2)
-        if original2 != now2
-    )
+    expected2 = sorted(rename_log2["Original Name"])
+    exact2 = [name for name in expected2 if name in restored2]
 
     mo.md(
-        "Folders now look like:\n\n```\n"
-        + "\n".join(restored2[:5])
-        + f"\n```\n\n**{changed2} differ from the names Brightspace gave.**"
+        f"**{restoration2}**\n\n"
+        f"{len(exact2)} of {len(expected2)} folders restored to the exact name "
+        "Brightspace gave.\n\n```\n" + "\n".join(restored2[:4]) + "\n```"
     )
     return
 

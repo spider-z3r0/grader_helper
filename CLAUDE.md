@@ -74,8 +74,6 @@ setup and marimo walkthrough; you rarely need it.
   domain**.
 - `alphabetise_folders` returns `None` and writes `folder_rename_log.csv`;
   the handoff to `brightspace_name_folders` is that file, not a value.
-- `brightspace_name_folders` has **no tests** and does not restore the
-  original folder names — it upper-cases them.
 - `notebooks/grading_walkthrough.py` is deliberately plain and explicit, with
   each assessment written out in full. Do not "improve" it into a selector;
   that is scheduled, and not yet.
