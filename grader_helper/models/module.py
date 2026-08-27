@@ -110,6 +110,23 @@ class Module(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _assessments_know_where_they_live(self) -> Self:
+        """Push the assessments directory down into each assessment.
+
+        An Assessment holds relative names only, so on its own it cannot turn
+        them into paths -- nothing in it knows where the module sits. Binding
+        here is what lets `a.submissions_path` be a plain property instead of
+        a method every call site has to hand the root to.
+
+        Skipped when there is no root: a Module built in memory for validation
+        is still perfectly valid, it just cannot resolve paths yet.
+        """
+        if self.root is not None:
+            for assessment in self.assessments:
+                assessment.bind(self.assessments_dir)
+        return self
+
+    @model_validator(mode="after")
     def _column_names_are_unique(self) -> Self:
         """Two assessments must not claim the same grade-sheet column."""
         seen: dict[str, str] = {}
@@ -164,6 +181,18 @@ class Module(BaseModel):
         return self._resolve(self.paths.departmental_sheet)
 
     # ------------------------------------------------------------- grade sheet
+
+    @property
+    def directories(self) -> list[pl.Path]:
+        """Every directory this module needs on disk, outermost first.
+
+        What init_module creates, and what a dashboard would check for before
+        offering to run anything.
+        """
+        wanted = [self.root, self.assessments_dir] if self.root else []
+        for assessment in self.assessments:
+            wanted.extend(assessment.directories)
+        return wanted
 
     @property
     def grade_sheet_columns(self) -> list[str]:

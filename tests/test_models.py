@@ -241,7 +241,7 @@ def test_paths_resolve_against_the_module_root(tmp_path):
 def test_an_assessment_folder_defaults_to_its_id(tmp_path):
     module = make_module(root=tmp_path)
     a = module.assessments[0]
-    assert a.folder_path(module.assessments_dir).name == a.id
+    assert a.folder_path.name == a.id
 
 
 def test_resolving_without_a_root_says_why():

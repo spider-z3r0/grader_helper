@@ -192,7 +192,9 @@ Done, 276 tests:
 - `Person` / `Assessment` / `Module` models and `module.toml` round-tripping
 - The four grade-sheet functions read from `Module` instead of regexing
   column names — see below
-- `init_module` writes a starter `module.toml`, comments and all
+- `init_module` writes a starter `module.toml`, comments and all, and
+  creates the folders it describes
+- The assessment folder layout is modelled — see below
 - The four Excel-writing functions covered and repaired — see below
 - A whole fake module on disk, and an end-to-end test over it
 
@@ -326,6 +328,55 @@ rewritten: the partial-write guard put the file clash on the first grader, so
 the refusal fired before anything was written and a per-file check passed by
 luck. Moving the clash to the last grader made it a real test. Worth
 remembering that "reintroduce the bug" catches bad tests, not just bad code.
+
+### The assessment folder layout
+
+An assessment's sub-directories are now fields, so `module.toml` records the
+layout and `init_module` creates it:
+
+```
+assessments/cw1/
+    Feedback sheet BLANK.xlsx     the author's
+    distributed.xlsx              the allocation, at the assessment root
+    submissions/                  the unzipped Brightspace download
+    grading_output/               grader workbooks, completed_grades.xlsx
+```
+
+`grading_output` holds only what the tool writes, so it can be deleted and
+regenerated without touching anything the author or Brightspace put there.
+
+**Field holds a name, property adds `_path`.** Same shape at every level, which
+is what makes the model readable:
+
+| field | default | property |
+|---|---|---|
+| `folder` | the assessment id | `folder_path` |
+| `submissions` | `"submissions"` | `submissions_path` |
+| `grading_output` | `"grading_output"` | `grading_output_path` |
+| `rubric` | — | `rubric_path` |
+
+The directory field cannot be called `graders`: `Assessment.graders` is already
+the list of `Person`.
+
+Every field has a default, so a `module.toml` written before they existed still
+loads and gets the conventional layout.
+
+**Assessments are bound on load.** An `Assessment` holds relative names only and
+has no idea where the module sits, so `Module` pushes `assessments_dir` down
+into each one in a `model_validator(mode="after")`. That is what lets
+`a.submissions_path` be a property rather than a method every call site hands
+the root to. An unbound `Assessment` raises rather than returning a path
+relative to the cwd.
+
+The bound root is a **`PrivateAttr`, not a `Field(exclude=True)`** — private
+attributes are left out of serialisation automatically. That matters for
+`model_dump_json()`, which is how a module gets inspected in a notebook; a
+bound root there would paste one machine's absolute path into whatever it
+lands in. The *file* is protected by a different rule — `save` only updates
+keys already present — which is why a test asserting only on the file passes
+even when the root is a serialisable field. That test was written, seen to
+pass against the broken version, and rewritten to assert on `model_dump`
+instead.
 
 ### The fake module, and the end-to-end test
 

@@ -29,7 +29,14 @@ import pathlib as pl
 from enum import Enum
 from typing import Any, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    field_validator,
+    model_validator,
+)
 
 from .people import Person, as_person
 
@@ -79,7 +86,18 @@ class Assessment(BaseModel):
     )
 
     folder: str | None = Field(
-        default=None, description="Submissions folder, relative to paths.assessments."
+        default=None,
+        description="This assessment's own folder, relative to paths.assessments. "
+        "Defaults to the assessment id.",
+    )
+    submissions: str = Field(
+        default="submissions",
+        description="The unzipped Brightspace download, relative to `folder`.",
+    )
+    grading_output: str = Field(
+        default="grading_output",
+        description="Everything the tool writes -- grader workbooks and the "
+        "combined grades -- relative to `folder`. Safe to delete and regenerate.",
     )
     rubric: str | None = Field(
         default=None, description="Blank feedback sheet, relative to `folder`."
@@ -95,6 +113,24 @@ class Assessment(BaseModel):
     due_date: str | None = None
 
     status: AssessmentStatus = Field(default_factory=AssessmentStatus)
+
+    #: Where ``paths.assessments`` resolves to, pushed down by Module on load.
+    #:
+    #: A PrivateAttr rather than a Field(exclude=True): private attributes are
+    #: left out of serialisation automatically, so round-tripping module.toml
+    #: cannot accidentally start writing an absolute path into a file that is
+    #: deliberately all relative.
+    _assessments_root: pl.Path | None = PrivateAttr(default=None)
+
+    def bind(self, assessments_root: pl.Path) -> "Assessment":
+        """Tell this assessment where the assessments directory is.
+
+        Called by Module once its own root is known. Without it an assessment
+        cannot resolve its own paths, because nothing else in the object knows
+        where on disk the module lives.
+        """
+        self._assessments_root = assessments_root
+        return self
 
     # ---------------------------------------------------------------- coercion
 
@@ -159,14 +195,42 @@ class Assessment(BaseModel):
 
     # ------------------------------------------------------------------ paths
 
-    def folder_path(self, assessments_root: pl.Path) -> pl.Path:
-        """Where this assessment's submissions live."""
-        return assessments_root / (self.folder or self.id)
+    def _root(self) -> pl.Path:
+        if self._assessments_root is None:
+            raise ValueError(
+                f"Assessment {self.id!r} does not know where it lives, so its "
+                "paths cannot be resolved. Reach it through a module loaded "
+                "with load_module() or ModuleFile.load(), which binds it, "
+                "rather than constructing it on its own."
+            )
+        return self._assessments_root
 
-    def rubric_path(self, assessments_root: pl.Path) -> pl.Path | None:
+    @property
+    def folder_path(self) -> pl.Path:
+        """This assessment's own folder, inside the assessments directory."""
+        return self._root() / (self.folder or self.id)
+
+    @property
+    def submissions_path(self) -> pl.Path:
+        """The unzipped Brightspace download."""
+        return self.folder_path / self.submissions
+
+    @property
+    def grading_output_path(self) -> pl.Path:
+        """Where the tool writes: grader workbooks and the combined grades."""
+        return self.folder_path / self.grading_output
+
+    @property
+    def rubric_path(self) -> pl.Path | None:
+        """The blank feedback sheet, or None if this assessment has no rubric."""
         if self.rubric is None:
             return None
-        return self.folder_path(assessments_root) / self.rubric
+        return self.folder_path / self.rubric
+
+    @property
+    def directories(self) -> tuple[pl.Path, ...]:
+        """Every directory this assessment needs, for init_module to create."""
+        return (self.folder_path, self.submissions_path, self.grading_output_path)
 
 
 def _tidy(value: float) -> str:

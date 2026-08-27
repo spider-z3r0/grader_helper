@@ -152,6 +152,9 @@ from grader_helper import (
 fake = make_fake_module(pl.Path.home() / "Documents" / "scratch" / "PS4001_nb")
 module = load_module(fake.root)
 
+# Paths come off the model: a.submissions_path, a.grading_output_path,
+# a.rubric_path -- no arguments, no hand-built strings.
+
 classlist = import_brightspace_classlist(fake.classlist)
 
 df = classlist[["Student ID", "Last Name", "First Name"]].copy()

@@ -100,6 +100,8 @@ class FakeModule(NamedTuple):
     submissions: dict[str, pl.Path]
     #: assessment id -> the blank feedback sheet
     rubrics: dict[str, pl.Path]
+    #: assessment id -> where the tool writes (grader workbooks, combined grades)
+    grading_output: dict[str, pl.Path]
     #: One row per student: ids, names, the mark written for each assessment,
     #: and the total and letter grade those marks should produce.
     expected: pd.DataFrame
@@ -256,18 +258,21 @@ def make_fake_module(
 
     submissions: dict[str, pl.Path] = {}
     rubrics: dict[str, pl.Path] = {}
+    grading_output: dict[str, pl.Path] = {}
 
     for index, spec in enumerate(ASSESSMENTS):
-        assessment_dir = root / "assessments" / spec["id"]
-        assessment_dir.mkdir(parents=True, exist_ok=True)
+        # init_module has already created folder/, submissions/ and
+        # grading_output/ -- ask the model where they are rather than
+        # rebuilding the paths here.
+        assessment = handle.module.assessment(spec["id"])
 
         rubrics[spec["id"]] = _write_feedback_sheet(
-            assessment_dir / "Feedback sheet BLANK.xlsx", mark=None
+            assessment.rubric_path, mark=None
         )
 
-        subs = assessment_dir / "submissions"
-        subs.mkdir(exist_ok=True)
+        subs = assessment.submissions_path
         submissions[spec["id"]] = subs
+        grading_output[spec["id"]] = assessment.grading_output_path
 
         for sid, _, last, *_ in COHORT:
             if sid == NON_SUBMITTER:
@@ -302,6 +307,7 @@ def make_fake_module(
         classlist=classlist,
         submissions=submissions,
         rubrics=rubrics,
+        grading_output=grading_output,
         expected=_expected_frame(),
         grade_cell=GRADE_CELL,
     )

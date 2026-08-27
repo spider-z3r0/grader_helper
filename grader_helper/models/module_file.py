@@ -329,6 +329,15 @@ _ASSESSMENT_PREAMBLE = """
 # The weights must sum to 100. That is checked every time the file loads,
 # because weights that do not sum to 100 make every student's total wrong and
 # the error is invisible until the marks are audited.
+#
+# Each assessment gets a folder, and inside it:
+#
+#   <folder>/                  the rubric, and distributed.xlsx once allocated
+#     submissions/             the unzipped Brightspace download
+#     grading_output/          grader workbooks and completed_grades.xlsx
+#
+# grading_output holds only what this tool writes, so it can be deleted and
+# regenerated without touching anything you or Brightspace put there.
 # ---------------------------------------------------------------------------
 """
 
@@ -342,7 +351,8 @@ def _render_assessment(spec: dict) -> str:
     """One [[assessment]] block, keys in a readable order."""
     ordered = [
         "id", "type", "name", "marks_out_of", "weight",
-        "folder", "rubric", "grade_cell", "graders", "group", "due_date",
+        "folder", "submissions", "grading_output",
+        "rubric", "grade_cell", "graders", "group", "due_date",
     ]
     lines = ["", "[[assessment]]"]
     for key in ordered:
@@ -366,6 +376,7 @@ def init_module(
     internal_moderator: "str | dict | Person | None" = None,
     paths: "dict | None" = None,
     overwrite: bool = False,
+    create_dirs: bool = True,
 ) -> ModuleFile:
     """
     Write a starter ``module.toml``, with its explanatory comments in place.
@@ -383,6 +394,10 @@ def init_module(
     internal_moderator: Optional, same forms as ``leader``.
     paths (dict | None): Overrides for the ``[paths]`` block.
     overwrite (bool): Whether to replace an existing file. Defaults to False.
+    create_dirs (bool): Also create the directories the module describes --
+        the assessments root, and each assessment's own folder, submissions
+        and grading_output. Defaults to True, because a module.toml naming
+        folders that do not exist is a half-finished setup.
 
     Returns:
     ModuleFile: The file, its parsed document and its validated model.
@@ -466,4 +481,11 @@ def init_module(
     module = _to_module(document, path)
 
     _atomic_write(path, text)
+
+    if create_dirs:
+        # After the write, so a module.toml that failed validation leaves no
+        # directories behind either.
+        for directory in module.directories:
+            directory.mkdir(parents=True, exist_ok=True)
+
     return ModuleFile(path, document, module)
