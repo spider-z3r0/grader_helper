@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 412 tests:
+Done, 412 tests on Linux and 413 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -1104,12 +1104,24 @@ Two things the walkthrough surfaced, neither a bug:
   means a sheet written before all the marking is in reads as a complete set
   of low grades. `write_departmental_sheet` leaves a missing mark blank rather
   than writing 0, so at least the empty cell is visible.
-- **Nothing has run the generated sheet through a real Excel yet.**
-  `test_excel_computes_what_we_compute` is written and carries the `excel`
-  marker, so it is skipped on Linux CI — which is everywhere it has been run
-  so far. It is the only test where our arithmetic and the sheet's actually
-  meet, and it needs running on Windows before the builder is trusted with a
-  live cohort.
+- **The Excel check now passes, and left one piece of noise behind.**
+  `test_excel_computes_what_we_compute` had only ever been skipped. Run on
+  Windows against a real Excel it passes: **413 passed, nothing skipped**.
+  Excel's `Total % Grade` and `Letter Grade` agree with
+  `prepare_data_for_departmental_template` on a generated sheet, so the
+  formulas the builder emits compute what we compute — not merely what
+  openpyxl can see, which is all every other test in that file can check.
+  Linux still reports 412 passed and 1 skipped.
+
+  The run prints `Windows fatal exception: code 0x800706ba`
+  (`RPC_S_SERVER_UNAVAILABLE`) with two thread dumps, and then passes. It is
+  COM teardown: `app.quit()` ends Excel, a lingering proxy is touched
+  afterwards, and pytest's `faulthandler` dumps the SEH exception before it
+  is handled normally. Cosmetic, but it reads like a crash. Not quietened,
+  because no machine here has Excel to tell a real fix from one that merely
+  moves the noise. It stops being cosmetic if stray `EXCEL.EXE` processes
+  start accumulating; `app.kill()` after `quit()` and `add_book=False` are
+  the things to try then.
 - A `.pyc` is tracked despite `.gitignore` listing `__pycache__/`. Ignore
   rules do not apply to already-tracked files: `git rm --cached` it.
 
