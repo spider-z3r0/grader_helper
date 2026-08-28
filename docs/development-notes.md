@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 356 tests:
+Done, 357 tests:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -377,11 +377,9 @@ checked by exactly the path that reads it back.
 The route to a module a leader can run end to end, in order. Each step
 assumes the one before it works.
 
-1. ~~**Quiz / MCQ collection**~~ — done, and the rules are recorded in
-   `module.toml`; see **Quiz collection**. One loose end left: the
-   walkthrough still does not drive a quiz. The fixture it needs now exists
-   (`make_fake_module(..., quizzes=True)`), so this is a notebook change
-   rather than a library one.
+1. ~~**Quiz / MCQ collection**~~ — done. The rules are recorded in
+   `module.toml`, and the walkthrough drives a term of quizzes end to end.
+   See **Quiz collection**.
 2. **Write everything to the departmental grade file** — the pieces exist
    (`prepare_data_for_departmental_template` is golden-tested); what is
    missing is getting a whole module's collated marks into the actual
@@ -409,10 +407,23 @@ being a distraction from the list above.
 #### A note on the walkthrough notebook
 
 `notebooks/grading_walkthrough.py` is deliberately plain and explicit, with
-cw1 and cw2 written out in full rather than driven by a selector. That is the
-point while the process is still being stepped through and checked -- every
-value visible, nothing hidden behind a widget. Convenience features belong in
-step 6, not before.
+cw1, cw2 and the quizzes written out in full rather than driven by a
+selector. That is the point while the process is still being stepped through
+and checked -- every value visible, nothing hidden behind a widget.
+Convenience features belong in step 6, not before.
+
+The quiz section is four cells against the coursework's ten, and the
+shortness is the content: every step of the coursework path exists because a
+human copies a number by hand, and nobody marks a quiz. No allocation, no
+distribution, no transcription, and so nothing to reconcile.
+
+**The notebook is now run by the suite.** `marimo.App.run()` executes every
+cell and raises whatever a cell raises, so `tests/test_walkthrough.py` drives
+the whole thing into a tmp directory and checks the marks it produced against
+the fixture's own expected column. "Verified end to end" was a claim in
+`docs/running-locally.md`; it is now something that fails when it stops being
+true. `GRADER_HELPER_SCRATCH` exists only so the test can redirect `ROOT`
+away from the user's home.
 
 ### Quiz collection
 
@@ -738,6 +749,16 @@ Two things the walkthrough surfaced, neither a bug:
 - **No moderation pack.** `Assessment.status.moderated` and
   `Module.internal_moderator` exist, but nothing samples submissions or
   stratifies them by letter grade. A feature to build, not a gap to cover.
+- **The repo-root shim covers the public API but not submodules.** The repo
+  directory is itself called `grader_helper`, so with its parent on
+  `sys.path` an `import grader_helper` finds `./__init__.py`, which
+  star-re-exports the package. `from grader_helper import catch_grades`
+  therefore works and the breakage stays invisible until something imports a
+  *submodule* -- `tests/fake_module.py` does
+  `from grader_helper.dataframe_operations import ...`, which the shim has no
+  path for. It bit `test_walkthrough.py`, which works around it by dropping
+  the stale binding; `test_import.py` does not catch it because it checks in
+  a subprocess. Giving the shim a `__path__` would close it properly.
 - A `.pyc` is tracked despite `.gitignore` listing `__pycache__/`. Ignore
   rules do not apply to already-tracked files: `git rm --cached` it.
 

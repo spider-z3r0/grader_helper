@@ -3,6 +3,7 @@ import marimo
 app = marimo.App(width="medium")
 
 with app.setup():
+    import os
     import pathlib as pl
     import sys
 
@@ -19,8 +20,10 @@ with app.setup():
         catch_grades,
         distribute_feedback_sheets,
         extract_studentid_grade,
+        collect_quiz_marks,
         import_brightspace_classlist,
         ingest_completed_graderfiles,
+        read_quiz,
         save_distributed_graders,
         save_grader_sheets,
         scan_multiple_subs,
@@ -33,11 +36,20 @@ with app.setup():
     # Somewhere short and disposable. NOT under OneDrive -- the generated
     # folder names are long, and make_fake_module overwrites feedback sheets
     # every time it runs.
-    ROOT = pl.Path.home() / "grader_helper_scratch" / "PS4001"
+    #
+    # The environment variable is only so the test suite can run this whole
+    # notebook into a temporary directory instead of your home folder. Ignore
+    # it; the default is the path you want.
+    ROOT = pl.Path(
+        os.environ.get(
+            "GRADER_HELPER_SCRATCH", pl.Path.home() / "grader_helper_scratch"
+        )
+    ) / "PS4001"
 
     # The assessments this walkthrough drives.
     ASSESSMENT_1_ID = "cw1"
     ASSESSMENT_2_ID = "cw2"
+    ASSESSMENT_3_ID = "quizzes"
 
 
 @app.cell
@@ -64,6 +76,12 @@ def intro():
         wrong. `catch_grades` and `ingest_completed_graderfiles` are the two
         halves of that audit, not alternatives.
 
+        Two courseworks go through all of that. The **quizzes** at the end do
+        not, and the reason is worth holding on to: every step above exists
+        because a human copies a number by hand. Nobody marks a quiz, so
+        there is no allocation, no feedback sheet, no transcription and
+        nothing to reconcile — just Brightspace's own exports, read.
+
         Run the cells in order. Each one prints what it did.
         """
     )
@@ -76,7 +94,16 @@ def init_the_module():
     # class list, submission folders and blank feedback sheets.
     #
     # distributed=False so the distribution step below has something to do.
-    FAKE = make_fake_module(ROOT, distributed=False, marked=False)
+    #
+    # quizzes=True puts eleven weekly quizzes where the MCQ would be, and
+    # writes Brightspace's own exports into their submissions folder. The
+    # weights are unchanged -- the quiz takes the MCQ's ten marks, not extra
+    # ones -- so nothing about cw1 or cw2 moves.
+    #
+    # DELETE ROOT before re-running if you built it before the quizzes
+    # existed: module.toml stops mentioning the MCQ, but `assessments/mcq/`
+    # stays on disk and is confusing to find there.
+    FAKE = make_fake_module(ROOT, distributed=False, marked=False, quizzes=True)
 
     HANDLE = ModuleFile.load(ROOT)
     MODULE = HANDLE.module
@@ -594,6 +621,110 @@ def cw2_record_progress(HANDLE):
     status2.model_dump()
     return
 
+
+@app.cell
+def quiz_intro():
+    mo.md(
+        """
+        ## The quizzes
+
+        Everything above happens because a grader writes a number on a
+        feedback sheet and then copies it somewhere else by hand. A quiz has
+        neither: Brightspace scores it, and exports one CSV per quiz.
+
+        So the whole of steps 3–7 collapses into a single read. There is
+        nothing to allocate, nothing to distribute, no second record, and so
+        nothing to reconcile — the audit that makes the coursework
+        trustworthy has nothing to audit here.
+
+        What is left is the module's own rules about what a pass is, and
+        those live in `module.toml` rather than in this notebook.
+        """
+    )
+    return
+
+
+@app.cell
+def quiz_pick_the_assessment(MODULE):
+    A3 = MODULE.assessment(ASSESSMENT_3_ID)
+    quiz_exports = sorted(A3.submissions_path.glob("*.csv"))
+
+    mo.md(f"""
+    ### {A3.name} (`{A3.id}`)
+
+    Marked out of {A3.marks_out_of}, worth {A3.weight}. No graders, no
+    rubric, no grade cell — nobody marks these.
+
+    **{len(quiz_exports)} exports** for {A3.marks_out_of} marks, so one may
+    be dropped.
+
+    | | |
+    |---|---|
+    | pass mark | `{A3.pass_mark}` — strictly above, so exactly {A3.pass_mark} fails |
+    | free passes | `{A3.free_passes}` |
+    | exports | `{A3.submissions_path}` |
+    | column | `{A3.raw_column}` |
+
+    Both numbers are read off the assessment. They are in `module.toml`, so
+    the module records its own rules rather than this notebook restating
+    them.
+    """)
+    return A3, quiz_exports
+
+
+@app.cell
+def quiz_look_at_one_export(quiz_exports):
+    # What Brightspace actually hands over, and what read_quiz does to it:
+    # the '#' comes off the username (the class list has it stripped too, and
+    # a join between the two forms silently matches nothing), every column is
+    # read as text so a leading zero survives, and the score column is named
+    # after the file.
+    one_quiz = read_quiz(quiz_exports[0]).collect()
+
+    one_quiz
+    return (one_quiz,)
+
+
+@app.cell
+def quiz_collect_the_marks(A3, cl):
+    """MODULE LEADER — the only step there is."""
+    # No pass mark and no free passes are passed in. Both come off the
+    # assessment, which read them from module.toml. With neither there, this
+    # raises rather than picking a threshold nobody chose.
+    quiz_marks = collect_quiz_marks(A3, cl)
+
+    quiz_marks
+    return (quiz_marks,)
+
+
+@app.cell
+def quiz_check_the_edges(A3, quiz_marks):
+    # Two students are worth looking at by name, because they are where the
+    # rules are visible rather than merely applied.
+    by_id = quiz_marks.set_index("Student ID")[A3.raw_column]
+
+    mo.md(f"""
+    | student | mark | why |
+    |---|---|---|
+    | 23304309 Joyce | **{by_id["23304309"]}** | sat no quiz at all, so appears in no export. The free pass is *not* given: the departmental sheet awards NG rather than F while the total is zero, and one free mark here would quietly make him a fail |
+    | 23304308 Ivers | **{by_id["23304308"]}** | passed 9 of 11, and the free pass takes her to the {A3.marks_out_of} available. It cannot take her past it |
+
+    Full distribution: `{by_id.value_counts().sort_index().to_dict()}`
+
+    Every student in the class list has a row, including the ones in no
+    export. A missing row would take a component out of a module total, and
+    a total missing a component is still a plausible number.
+    """)
+    return
+
+
+@app.cell
+def quiz_record_progress(HANDLE):
+    HANDLE.set_status(ASSESSMENT_3_ID, grades_collected=True)
+
+    status3 = ModuleFile.load(ROOT).module.assessment(ASSESSMENT_3_ID).status
+    status3.model_dump()
+    return
 
 
 if __name__ == "__main__":
