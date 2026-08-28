@@ -62,7 +62,6 @@ import warnings
 
 import pandas as pd
 
-from .dataframe_operations.calculate_weighted_score import calculate_weighted_score
 from .file_operations.catch_grades import catch_grades
 from .ingesting.collect_quiz_marks import collect_quiz_marks
 from .models import Assessment, Module
@@ -324,9 +323,26 @@ def collate_module_marks(
         )
 
     for assessment in module.assessments:
-        if assessment.needs_weighting:
-            calculate_weighted_score(
-                collated, assessment.raw_column, assessment.weight_fraction()
-            )
+        if not assessment.needs_weighting:
+            continue
+
+        # The column's name comes from the assessment, not from re-deriving it
+        # from the fraction.
+        #
+        # `calculate_weighted_score` infers the label by multiplying the
+        # fraction by 100, which is the weight only when the piece is marked
+        # out of 100. Out of 50 and worth 25 it produces "(50)" -- the raw
+        # column's own name, which it then refuses to overwrite; out of 10 and
+        # worth 35 it produces "(350)". It reports both by *returning* a
+        # string, and that return value was being discarded here, so the
+        # weighted column silently never appeared and the failure surfaced two
+        # steps later as `prepare_data_for_departmental_template` complaining
+        # about a missing column. Exactly the shape of bug this package spends
+        # its guards on: a component quietly absent from every total.
+        marks = collated[assessment.raw_column]
+        if not pd.api.types.is_numeric_dtype(marks):
+            marks = pd.to_numeric(marks, errors="coerce")
+
+        collated[assessment.weighted_column] = marks * assessment.weight_fraction()
 
     return collated

@@ -132,3 +132,89 @@ def test_the_walkthrough_runs_and_collects_the_quizzes(walkthrough):
     assert {
         a.id: a.status.grades_collected for a in recorded.assessments
     } == {"cw1": True, "cw2": True, "quizzes": True}
+
+
+def test_the_walkthrough_writes_both_departmental_sheets(walkthrough):
+    """The two workbooks the notebook now ends with.
+
+    PS4001 is the template's own shape, so building it must give the
+    department's file back. PS4002 is the shape it has no room for, and is
+    the reason the builder exists -- so what is checked there is the two
+    things a module leader would otherwise have re-pointed by hand.
+    """
+    from openpyxl import load_workbook
+
+    template = load_workbook(walkthrough["TEMPLATE"])["GradeTemplate"]
+    first = load_workbook(walkthrough["sheet_path"])["GradeTemplate"]
+    second = load_workbook(walkthrough["sheet_2_path"])["GradeTemplate"]
+
+    def headers(sheet):
+        return [
+            sheet.cell(29, column).value
+            for column in range(1, sheet.max_column + 1)
+            if sheet.cell(29, column).value
+        ]
+
+    # PS4001 fits the template's shape -- two 100-mark pieces and a ten-mark
+    # one -- so its sheet is the department's own layout, column for column.
+    # Only the third assessment's *name* differs, because the walkthrough
+    # builds the module with weekly quizzes in the MCQ's slot.
+    assert len(headers(first)) == len(headers(template))
+    assert headers(first)[:6] == headers(template)[:6]
+    assert headers(first)[7:] == headers(template)[7:]
+    assert headers(first)[6] == "Quizzes (10)"
+    assert first["D30"].value == template["D30"].value
+    assert first["F30"].value == template["F30"].value
+    assert first["H30"].value == template["H30"].value
+    assert first["I30"].value == template["I30"].value
+    # ...with the marks in and the samples gone.
+    assert first["A30"].value != "Sample1"
+    assert first["C30"].value is not None
+
+    # PS4002 does not fit. Six assessment columns where the template has five.
+    assert headers(second) == [
+        "Name", "Student ID",
+        "Coursework 1 (100)", "Coursework 1 (30)",
+        "MCQ 1 (10)", "MCQ 1 (35)",
+        "MCQ 2 (10)", "MCQ 2 (35)",
+        "Total % Grade", "Letter Grade", "Comments",
+    ]
+
+    # Every assessment reaches the total -- the failure the builder exists to
+    # prevent is one of them quietly missing from it.
+    assert second["I30"].value == "=ROUND(SUM(D30,F30,H30),0)"
+
+    # The letter grade reads the total where it actually is, and the
+    # distribution reads the letter grade where it actually is.
+    assert second["J30"].value.startswith("=IF(ROUND(I30,2)>0,")
+    assert second["H6"].value == '=COUNTIF(J30:J530,"A1")'
+
+    # The descriptives cover every column, which is the A23 block the notes
+    # name as the thing that goes wrong by hand.
+    for column in range(3, 10):  # C..I: the assessment block plus the total
+        assert second.cell(23, column).value is not None, column
+        assert second.cell(25, column).value is not None, column
+    assert second.cell(23, 10).value is None, "nothing spills into Letter Grade"
+
+
+def test_the_second_module_totals_what_the_fixture_expects(walkthrough):
+    """PS4002's marks survive collation, weighting and banding.
+
+    The MCQs are handed in through `marks=` rather than read off disk, and
+    they are marked out of 10 while being worth 35 -- a scale-up, which is
+    the case that silently lost its weighted column before
+    `collate_module_marks` stopped inferring the column's name.
+    """
+    second = walkthrough["SECOND"]
+    sheet = walkthrough["module_2_sheet"].set_index("Student ID")
+    expected = second.expected.set_index("Student ID")
+
+    assert set(sheet.index) == set(expected.index)
+    assert sheet["Total % Grade"].to_dict() == expected["Total % Grade"].to_dict()
+    assert sheet["Letter Grade"].to_dict() == expected["Letter Grade"].to_dict()
+
+    # The weighted columns exist and hold the scale-up.
+    assert sheet["MCQ 1 (35)"].to_dict() == (sheet["MCQ 1 (10)"] * 3.5).to_dict()
+
+    # Joyce sat nothing and scored nothing, in this module as in the other.
+    assert sheet.loc["23304309", "Letter Grade"] == "NG"

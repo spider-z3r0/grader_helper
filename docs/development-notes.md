@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 407 tests:
+Done, 410 tests:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -408,6 +408,24 @@ assumes the one before it works.
 **Polars migration** is unblocked but not scheduled: the Excel round-trip
 tests are the contract a port has to keep, and it can land whenever it stops
 being a distraction from the list above.
+
+#### PS4002, and why there are two modules in the walkthrough
+
+The notebook ends with two modules, not one. **PS4001** is the template's own
+shape and exists to walk the marking process; **PS4002** — one coursework
+worth 30 and two MCQs worth 35 each — exists to show the sheet builder doing
+the thing a module leader used to do by hand.
+
+It is deliberately much shorter. The marking pipeline is written out twice
+already, so PS4002 skips it: the coursework gets feedback sheets, and the two
+MCQs are "sat on paper" and handed in through `collate_module_marks(marks=)`,
+which is what that argument is for. Same cohort, same class list — the same
+students taking a second module.
+
+Its MCQs are marked out of 10 and worth 35, which is a scale-up rather than
+the usual scale-down, and that is the point: it is the first assessment in
+the project not marked out of 100 or on its own weight, and it found the
+collation bug above on its first run.
 
 #### A note on the walkthrough notebook
 
@@ -577,6 +595,30 @@ complaining that it had no pass mark: an error about the wrong assessment
 entirely, in a step the reader was not thinking about. Two fixes, both kept:
 a `grade_cell` now settles it before the folder is looked at, and the export
 check ignores the files this package itself writes there.
+
+#### The weighted column has to be named by the assessment
+
+`collate_module_marks` used to weight through `calculate_weighted_score`,
+which infers the new column's name by multiplying the fraction by 100. That
+is the weight only when the piece is marked out of 100. Out of 50 and worth
+25 it produces `(50)` — the raw column's own name, which it then refuses to
+overwrite — and out of 10 and worth 35 it produces `(350)`.
+
+It reports both by *returning* a string, and the return value was being
+discarded. So the weighted column silently never appeared, and the failure
+surfaced two steps later as `prepare_data_for_departmental_template`
+complaining about a column it had been given no way to create. A component
+quietly absent from every total is the exact failure this package exists to
+prevent, and it was hiding in the code that assembles the totals.
+
+It stayed invisible because every assessment in the fixtures was marked out
+of 100, except the MCQ — which is worth what it is marked out of and so needs
+no weighted column at all. PS4002 in the walkthrough is the first assessment
+that scales *up* (10 marks worth 35), and it found this immediately.
+
+The collation now takes the name from `Assessment.weighted_column` and does
+the multiplication itself. `calculate_weighted_score` is unchanged and still
+correct for the out-of-100 case it was written for.
 
 #### The two records, and why there is no fallback
 

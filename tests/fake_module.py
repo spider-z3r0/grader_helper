@@ -105,6 +105,43 @@ COHORT = (
     ("23304311", "Liam",   "Lynch",    55, 60, 5),   # never submits
 )
 
+#: A second module, whose shape the departmental template has no room for.
+#:
+#: One coursework and *two* MCQs -- 30 + 35 + 35 -- where the template is
+#: written for two courseworks and one MCQ. Nothing about it is exotic; it is
+#: simply a permutation the department's file was not drawn for, which until
+#: `build_departmental_sheet` existed meant reshaping the block by hand.
+#:
+#: The MCQs are marked out of 10 and worth 35, the same `marks_out_of` the
+#: PS4001 MCQ uses. That is deliberately not a round ratio: 10 does not divide
+#: 35, so these exercise the `/marks_out_of*weight` branch of the weighting
+#: while the coursework (100 out of, 30 worth) does too, and neither gets the
+#: exact-divisor form. See `weighting_formula`.
+SECOND_CODE = "PS4002"
+SECOND_ASSESSMENTS = (
+    dict(id="cw1", type="coursework", name="Coursework 1",
+         marks_out_of=100, weight=30),
+    dict(id="mcq1", type="mcq", name="MCQ 1", marks_out_of=10, weight=35),
+    dict(id="mcq2", type="mcq", name="MCQ 2", marks_out_of=10, weight=35),
+)
+
+
+def second_module_marks() -> dict[str, dict[str, int]]:
+    """PS4002's marks, derived from the same cohort rather than invented.
+
+    The coursework takes COHORT's cw1 column and MCQ 1 takes its mcq column.
+    MCQ 2 is cw2 scaled to ten, which keeps the two MCQ columns visibly
+    different -- two identical columns in a fixture read as a copy-paste slip
+    -- while preserving the edge cases that make the cohort worth having:
+    Joyce still scores zero on everything, so he is still NG rather than F.
+    """
+    return {
+        "cw1": {sid: cw1 for sid, _, _, cw1, _, _ in COHORT},
+        "mcq1": {sid: mcq for sid, _, _, _, _, mcq in COHORT},
+        "mcq2": {sid: round(cw2 / 10) for sid, _, _, _, cw2, _ in COHORT},
+    }
+
+
 #: The student who is in the class list but has no submission folder.
 NON_SUBMITTER = "23304311"
 
@@ -448,6 +485,148 @@ def make_fake_module(
         expected=_expected_frame(),
         grade_cell=GRADE_CELL,
     )
+
+
+def make_second_module(root: pl.Path, marked: bool = True) -> FakeModule:
+    """
+    Write PS4002 -- one coursework and two MCQs -- to ``root``.
+
+    A shape the departmental template has no room for, built so the
+    walkthrough can show `build_departmental_sheet` laying a sheet out for it.
+    Deliberately lighter than `make_fake_module`: the marking pipeline is
+    demonstrated twice over by PS4001, so this writes only what is needed to
+    collate a module and build its sheet.
+
+    Args:
+    root (pl.Path): Directory to build in. Created if absent.
+    marked (bool): Write each student's mark into their coursework feedback
+        sheet. The MCQs have no sheets at all -- they are sat on paper, and
+        their marks are handed to `collate_module_marks` through ``marks=``.
+
+    Returns:
+    FakeModule: The paths, plus an ``expected`` frame carrying the marks for
+    all three assessments, so the MCQ marks a caller has to hand in come from
+    the fixture rather than being retyped.
+
+    Note:
+        The cohort and the class list are PS4001's. These are the same
+        students taking a second module, which is what makes it reasonable to
+        reuse the class list rather than invent a parallel one.
+
+    Example:
+        >>> second = make_second_module(pl.Path("scratch/PS4002"))
+        >>> by_id = second.expected.set_index("Student ID")
+        >>> collate_module_marks(
+        ...     module,
+        ...     class_list,
+        ...     source="feedback",
+        ...     marks={"mcq1": by_id["mcq1"].to_dict()},
+        ... )
+    """
+    root = pl.Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    marks = second_module_marks()
+
+    handle = init_module(
+        root,
+        code=SECOND_CODE,
+        name="Cognition and Perception",
+        year="2025/26",
+        leader={"initials": "KOM", "name": "Kevin O Malley"},
+        internal_moderator="SOB",
+        assessments=[
+            {**spec, "folder": spec["id"]}
+            if spec["type"] != "coursework"
+            else {**spec, "folder": spec["id"],
+                  "rubric": "Feedback sheet BLANK.xlsx",
+                  "grade_cell": GRADE_CELL, "graders": ["KOM", "SOB"]}
+            for spec in SECOND_ASSESSMENTS
+        ],
+        paths={"classlist": "classlist.xlsx"},
+        overwrite=True,
+    )
+
+    classlist = root / "classlist.xlsx"
+    _classlist_frame().to_excel(classlist, index=False)
+
+    submissions: dict[str, pl.Path] = {}
+    rubrics: dict[str, pl.Path] = {}
+    grading_output: dict[str, pl.Path] = {}
+
+    for spec in SECOND_ASSESSMENTS:
+        assessment = handle.module.assessment(spec["id"])
+        submissions[spec["id"]] = assessment.submissions_path
+        grading_output[spec["id"]] = assessment.grading_output_path
+
+        if spec["type"] != "coursework":
+            # Nobody hands in an MCQ sat in a lecture theatre, so there is no
+            # download to unzip and no feedback sheet to read. The marks reach
+            # collate_module_marks through `marks=` instead, which is what
+            # that argument is for.
+            continue
+
+        rubrics[spec["id"]] = _write_feedback_sheet(assessment.rubric_path, mark=None)
+
+        for sid, _, last, *_ in COHORT:
+            if sid == NON_SUBMITTER:
+                continue
+            folder = assessment.submissions_path / _brightspace_folder(
+                sid, last, "14 April 2026 430 PM"
+            )
+            folder.mkdir(exist_ok=True)
+            _write_feedback_sheet(
+                folder / f"Feedback sheet {sid}.xlsx",
+                mark=marks[spec["id"]][sid] if marked else None,
+            )
+
+    return FakeModule(
+        root=root,
+        module_file=handle.path,
+        classlist=classlist,
+        submissions=submissions,
+        rubrics=rubrics,
+        grading_output=grading_output,
+        quiz_exports={},
+        expected=_second_expected_frame(marks),
+        grade_cell=GRADE_CELL,
+    )
+
+
+def _second_expected_frame(marks: dict) -> pd.DataFrame:
+    """PS4002's marks and the total they should produce.
+
+    Weighted the way the sheet weights them -- each component scaled by
+    weight/marks_out_of and left unrounded, with excel_round applied once to
+    the total. Rounding the components instead moves totals across band
+    boundaries, which is the whole point of the rule.
+    """
+    rows = []
+    for sid, first, last, *_ in COHORT:
+        # The non-submitter has no feedback sheet, so there is no coursework
+        # mark to read and his total is the MCQs alone. Crediting him with the
+        # cohort's cw1 value would make `expected` disagree with anything that
+        # actually collates the module -- and disagree by 30 marks, silently.
+        submitted = sid != NON_SUBMITTER
+        coursework = marks["cw1"][sid] if submitted else None
+        total = excel_round(
+            (coursework * (30 / 100) if submitted else 0)
+            + marks["mcq1"][sid] * (35 / 10)
+            + marks["mcq2"][sid] * (35 / 10)
+        )
+        rows.append(
+            {
+                "Student ID": sid,
+                "First Name": first,
+                "Last Name": last,
+                "cw1": coursework,
+                "mcq1": marks["mcq1"][sid],
+                "mcq2": marks["mcq2"][sid],
+                "Total % Grade": total,
+                "Letter Grade": make_letter_grade(total),
+                "submitted": sid != NON_SUBMITTER,
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 if __name__ == "__main__":

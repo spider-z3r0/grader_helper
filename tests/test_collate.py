@@ -12,6 +12,8 @@ as if it were a coursework.
 House convention: ``pl`` is pathlib, ``pr`` is polars.
 """
 
+import sys
+
 import pandas as pd
 import pytest
 
@@ -358,3 +360,55 @@ def test_something_that_is_not_a_module_is_refused(quiz_module):
 
     with pytest.raises(ValueError, match="load_module"):
         collate_module_marks({"code": "PS4001"}, class_list)
+
+
+def test_weighting_survives_an_assessment_not_marked_out_of_100(tmp_path):
+    """The weighted column must be named by the assessment, not inferred.
+
+    `calculate_weighted_score` derives the label by multiplying the fraction
+    by 100, which is the weight only when the piece is marked out of 100. Out
+    of 50 and worth 25 it produces '(50)' -- the raw column's own name, which
+    it refuses to overwrite -- and out of 10 and worth 35 it produces '(350)'.
+    Both were reported by returning a string, and `collate_module_marks`
+    discarded it, so the weighted column silently never appeared. The failure
+    then surfaced two steps later, as
+    `prepare_data_for_departmental_template` complaining about a missing
+    column it had been handed no way to create.
+
+    That is the failure mode this package exists to prevent: a component
+    quietly absent from a total that still looks like a mark.
+    """
+    import pathlib as pl
+
+    from grader_helper import collate_module_marks, import_brightspace_classlist
+    from grader_helper.models import ModuleFile
+
+    sys.path.insert(0, str(pl.Path(__file__).parent))
+    from fake_module import make_second_module
+
+    second = make_second_module(tmp_path / "PS4002")
+    module = ModuleFile.load(tmp_path / "PS4002").module
+    class_list = import_brightspace_classlist(module.classlist_path)
+    by_id = second.expected.set_index("Student ID")
+
+    marks = collate_module_marks(
+        module,
+        class_list,
+        source="feedback",
+        marks={
+            "mcq1": by_id["mcq1"].to_dict(),
+            "mcq2": by_id["mcq2"].to_dict(),
+        },
+    )
+
+    # Every column the module declares, weighted ones included.
+    for column in module.grade_sheet_columns:
+        assert column in marks.columns, f"{column} is missing from the collation"
+
+    # And they hold the right arithmetic: 10 marks worth 35 scales by 3.5.
+    mcq1 = module.assessment("mcq1")
+    assert mcq1.weight_fraction() == 3.5
+    assert (
+        marks["MCQ 1 (35)"].tolist()
+        == (marks["MCQ 1 (10)"] * 3.5).tolist()
+    )

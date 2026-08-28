@@ -12,7 +12,7 @@ with app.setup():
     from openpyxl import load_workbook
 
     sys.path.insert(0, "tests")          # so `fake_module` is importable
-    from fake_module import make_fake_module
+    from fake_module import make_fake_module, make_second_module
 
     from grader_helper import (
         alphabetise_folders,
@@ -20,6 +20,7 @@ with app.setup():
         catch_grades,
         distribute_feedback_sheets,
         extract_studentid_grade,
+        build_departmental_sheet,
         collate_module_marks,
         collect_quiz_marks,
         import_brightspace_classlist,
@@ -29,6 +30,7 @@ with app.setup():
         save_distributed_graders,
         save_grader_sheets,
         scan_multiple_subs,
+        write_departmental_sheet,
     )
     from grader_helper.file_operations.brightspace_name_folders import (
         brightspace_name_folders,
@@ -47,6 +49,18 @@ with app.setup():
             "GRADER_HELPER_SCRATCH", pl.Path.home() / "grader_helper_scratch"
         )
     ) / "PS4001"
+
+    # The second module, which exists to show a shape the department's
+    # template has no room for. Same scratch directory, beside PS4001.
+    ROOT_2 = ROOT.parent / "PS4002"
+
+    # The department's own workbook, which lives in the repo. Located from
+    # this file rather than the working directory, so the notebook works
+    # wherever marimo is started from.
+    TEMPLATE = (
+        pl.Path(__file__).resolve().parent.parent
+        / "Dept grade sheet Template 2026.xlsx"
+    )
 
     # The assessments this walkthrough drives.
     ASSESSMENT_1_ID = "cw1"
@@ -800,9 +814,216 @@ def look_at_the_edges(module_sheet):
     | 23304309 Joyce | {graded.loc["23304309", "Total % Grade"]} | {graded.loc["23304309", "Letter Grade"]} | scored zero on everything and sat no quiz. NG, not F -- no participation is a different thing from a mark of zero |
     | 23304311 Lynch | {graded.loc["23304311", "Total % Grade"]} | {graded.loc["23304311", "Letter Grade"]} | never submitted, and still on the sheet. A student missing from the sheet has no grade at all, which nobody notices |
 
-    Writing this into the department's own workbook is the next piece, and it
-    needs the workbook: `paths.departmental_sheet` in `module.toml` is where
-    it goes.
+    That frame is *our* arithmetic. The next cell puts it into the
+    department's own workbook, which is the arithmetic that counts.
+    """)
+    return
+
+
+@app.cell
+def the_departmental_workbook():
+    mo.md(
+        """
+        ## Into the department's workbook
+
+        The frame above is our arithmetic. The workbook is the department's,
+        and where the two disagree the workbook wins -- it is the source of
+        truth precisely because anyone can open it and read the grades
+        without running any of this.
+
+        So two steps, and the split matters:
+
+        - `build_departmental_sheet` lays the sheet out for the module's
+          assessments and writes the department's **formulas** into it. It
+          never writes a computed value, so the sheet still does its own
+          arithmetic.
+        - `write_departmental_sheet` puts in the name, the student id and
+          each mark as awarded. Five values a row for this module, and
+          nothing else -- filling in the weighted columns or the total would
+          replace the department's arithmetic with ours, which is backwards.
+
+        PS4001 is the shape the template was drawn for, so building it is a
+        no-op in effect: you get the department's own file back, minus the
+        sample rows. The module after this one is the interesting case.
+        """
+    )
+    return
+
+
+@app.cell
+def write_the_departmental_sheet(MODULE, module_marks):
+    """MODULE LEADER -- the sheet that goes to the department."""
+    sheet_path = build_departmental_sheet(
+        MODULE, TEMPLATE, MODULE.root / f"{MODULE.code} grades.xlsx",
+        overwrite=True,
+    )
+    write_departmental_sheet(module_marks, MODULE, sheet_path)
+
+    mo.md(f"Written to `{sheet_path}`")
+    return (sheet_path,)
+
+
+@app.cell
+def check_what_landed(sheet_path):
+    # Read it back the way a colleague would -- openpyxl does not evaluate
+    # formulas, so this shows what is actually stored in each cell rather
+    # than what Excel makes of it.
+    landed = load_workbook(sheet_path)["GradeTemplate"]
+
+    mo.md(f"""
+    Row 29 (the headers): `{[landed.cell(29, i).value for i in range(1, 11)]}`
+
+    | cell | holds | |
+    |---|---|---|
+    | `A30` | `{landed["A30"].value}` | ours |
+    | `C30` | `{landed["C30"].value}` | ours -- the mark as awarded |
+    | `D30` | `{landed["D30"].value}` | the department's |
+    | `F30` | `{landed["F30"].value}` | the department's |
+    | `H30` | `{landed["H30"].value}` | the department's |
+
+    `F30` is `=E30/2`, not `=E30/100*50`. Those are the same sum on paper and
+    not in floating point: `x/2` is exact, `x/100*50` is two roundings, and
+    since the total is `ROUND(SUM(...),0)` the difference lands on whole
+    marks. At a coursework mark of 29 the two give 15 and 14.
+    """)
+    return
+
+
+@app.cell
+def second_module_intro():
+    mo.md(
+        """
+        # A module the template has no room for
+
+        Everything above is **PS4001**: two courseworks and an MCQ, which is
+        exactly the permutation the departmental template was drawn for. Its
+        formulas hardcode that shape -- `D=C/100*40`, `F=E/2`, and a total
+        summing exactly `D, F, G`.
+
+        **PS4002** is one coursework worth 30 and *two* MCQs worth 35 each.
+        Nothing exotic; simply a shape the department's file was not drawn
+        for. Until now that meant the module leader reshaped the block by
+        hand, and the two places that goes wrong are the two that move when
+        the block changes width:
+
+        - the **descriptives at A23** -- Mean, SD and N, one formula per
+          column, and nothing complains when the last one is missing. A mean
+          over two of three components is a perfectly plausible number.
+        - the **Letter Grade column** and the eleven `COUNTIF`s that read it.
+          Miss one and the distribution reports the whole cohort as NG.
+
+        Same cohort, same class list -- these are the same students taking a
+        second module.
+        """
+    )
+    return
+
+
+@app.cell
+def init_the_second_module():
+    # Lighter than PS4001's fixture on purpose. The marking pipeline is
+    # demonstrated twice above, so this writes only what is needed to
+    # collate a module and build its sheet: the coursework gets feedback
+    # sheets, the MCQs get nothing at all.
+    SECOND = make_second_module(ROOT_2)
+    MODULE_2 = ModuleFile.load(ROOT_2).module
+
+    mo.md(f"""
+    **{MODULE_2.code} {MODULE_2.name}** ({MODULE_2.year})
+
+    - leader: `{MODULE_2.leader}`
+    - weights: `{ {a.name: a.weight for a in MODULE_2.assessments} }`
+    - grade sheet columns: `{MODULE_2.grade_sheet_columns}`
+
+    {len(MODULE_2.grade_sheet_columns)} columns of assessment where the
+    template has five. Both MCQs need a weighted column: marked out of 10 and
+    worth 35, they are not already on their own contribution the way PS4001's
+    MCQ was.
+    """)
+    return MODULE_2, SECOND
+
+
+@app.cell
+def second_module_collate(MODULE_2, SECOND, cl):
+    """MODULE LEADER -- every assessment's marks, in one frame."""
+    # The coursework is read off its feedback sheets, as ever. The two MCQs
+    # were sat on paper in a lecture theatre, so nothing on disk holds them
+    # and they are handed in through `marks=`. collate_module_marks decides
+    # per assessment by asking what it *has*, not what its type says.
+    second_by_id = SECOND.expected.set_index("Student ID")
+
+    module_2_marks = collate_module_marks(
+        MODULE_2,
+        cl,
+        source="feedback",
+        marks={
+            "mcq1": second_by_id["mcq1"].to_dict(),
+            "mcq2": second_by_id["mcq2"].to_dict(),
+        },
+    )
+
+    module_2_marks
+    return (module_2_marks,)
+
+
+@app.cell
+def second_module_prepare(MODULE_2, module_2_marks):
+    """MODULE LEADER -- totalled, banded, in the department's column order."""
+    module_2_sheet = prepare_data_for_departmental_template(
+        module_2_marks, MODULE_2
+    )
+
+    module_2_sheet
+    return (module_2_sheet,)
+
+
+@app.cell
+def second_module_build_the_sheet(MODULE_2, module_2_marks):
+    """MODULE LEADER -- and this is the part that was done by hand."""
+    sheet_2_path = build_departmental_sheet(
+        MODULE_2, TEMPLATE, MODULE_2.root / f"{MODULE_2.code} grades.xlsx",
+        overwrite=True,
+    )
+    write_departmental_sheet(module_2_marks, MODULE_2, sheet_2_path)
+
+    mo.md(f"Written to `{sheet_2_path}`")
+    return (sheet_2_path,)
+
+
+@app.cell
+def second_module_what_the_builder_did(sheet_2_path):
+    built = load_workbook(sheet_2_path)["GradeTemplate"]
+    headers = [built.cell(29, i).value for i in range(1, 11)]
+
+    mo.md(f"""
+    ### What would otherwise have been hand-edited
+
+    Row 29: `{headers}`
+
+    | | | |
+    |---|---|---|
+    | weighting | `{built["D30"].value}` | coursework, 100 marks worth 30 |
+    | weighting | `{built["F30"].value}` | MCQ 1, 10 marks worth 35 |
+    | weighting | `{built["H30"].value}` | MCQ 2, same again |
+    | **total** | `{built["I30"].value}` | three components, not the template's `D, F, G` |
+    | **letter** | `{built["J30"].value[:38]}...` | reads `I30`, not the template's `H30` |
+
+    The descriptives moved with it -- one column each, none missed:
+
+    | row | C | E | G | I |
+    |---|---|---|---|---|
+    | Mean | `{built["C23"].value}` | `{built["E23"].value}` | `{built["G23"].value}` | `{built["I23"].value}` |
+    | N | `{built["C25"].value}` | `{built["E25"].value}` | `{built["G25"].value}` | `{built["I25"].value}` |
+
+    And the distribution follows the Letter Grade column wherever it landed:
+    `{built["H6"].value}`
+
+    Two details worth reading twice. The **N row counts the raw column**, not
+    its own -- `D25` counts `C`, because the weighting formula sits in all 501
+    rows and counting it would return 501 whatever the cohort. And the
+    weightings are `/10*35` rather than a single divisor, because 10 does not
+    divide 35 exactly; where it does divide, as in PS4001's `=E30/2`, the
+    shorter form is used because it is the one that is exact.
     """)
     return
 
