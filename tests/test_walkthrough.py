@@ -97,6 +97,10 @@ def test_the_walkthrough_runs_and_collects_the_quizzes(walkthrough):
     assert collected["23304309"] == 0, "the non-participant must not be given a free pass"
     assert collected["23304308"] == 10, "nine passes plus the free pass, capped"
 
-    # And the progress the last cell records.
-    status = walkthrough["ModuleFile"].load(fake.root).module
-    assert status.assessment("quizzes").status.grades_collected
+    # And the progress each section records. All three, because cw1 went
+    # without a record_progress cell until someone ran the notebook to the
+    # end and read its own status output back.
+    recorded = walkthrough["ModuleFile"].load(fake.root).module
+    assert {
+        a.id: a.status.grades_collected for a in recorded.assessments
+    } == {"cw1": True, "cw2": True, "quizzes": True}

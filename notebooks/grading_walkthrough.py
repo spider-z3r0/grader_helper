@@ -399,6 +399,21 @@ def cw1_rename_for_reupload(A, rename_log):
 
 
 @app.cell
+def cw1_record_progress(HANDLE):
+    HANDLE.set_status(
+        ASSESSMENT_1_ID,
+        graders_allocated=True,
+        sheets_distributed=True,
+        grades_collected=True,
+    )
+
+    # Read back the assessment we just wrote, not the other one.
+    status = ModuleFile.load(ROOT).module.assessment(ASSESSMENT_1_ID).status
+    status.model_dump()
+    return
+
+
+@app.cell
 def cw2_pick_the_assessment(MODULE):
     A2 = MODULE.assessment(ASSESSMENT_2_ID)
     GRADERS2 = [person.initials for person in A2.graders]
