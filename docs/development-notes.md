@@ -1151,6 +1151,22 @@ Two things the walkthrough surfaced, neither a bug:
   openpyxl can see, which is all every other test in that file can check.
   Linux still reports 412 passed and 1 skipped.
 
+  Two pieces of console noise it does not mean anything by. The
+  `Reading feedback: 100%|...| 11/11` lines are `tqdm` progress bars from
+  `catch_grades`, which write to stderr. And openpyxl warns `Unknown
+  extension is not supported and will be removed` on every read of the
+  template: the extension is `mx:PLV`, Excel for Mac's **page-layout view
+  preference**, recorded by whoever last had the file open on a Mac. It is a
+  view setting, not data or a formula, so dropping it costs nothing.
+
+  Reading that XML did turn up something worth covering, though. The SD row
+  is stored as a dynamic-array formula (`<f t="array" ref="C24">` around
+  `_xlfn.STDEV.S` over `_xlfn._xlws.FILTER`), the builder regenerates it, and
+  openpyxl can only confirm the *text* is right. Whether Excel still
+  evaluates it in a rebuilt file rather than showing `#NAME?` is only
+  answerable with Excel, so `test_excel_computes_what_we_compute` now checks
+  the Mean, SD and N as well as the total and the letter grade.
+
   The run prints `Windows fatal exception: code 0x800706ba`
   (`RPC_S_SERVER_UNAVAILABLE`) with two thread dumps, and then passes. It is
   COM teardown: `app.quit()` ends Excel, a lingering proxy is touched

@@ -14,6 +14,7 @@ House convention: ``pl`` is pathlib, ``pr`` is polars.
 """
 
 import pathlib as pl
+import statistics
 
 import pandas as pd
 import pytest
@@ -651,6 +652,14 @@ def test_excel_computes_what_we_compute(built_sheet, template_shaped_module, mar
         app.calculate()
         totals = [sheet.range(f"H{30 + i}").value for i in range(len(complete))]
         letters = [sheet.range(f"I{30 + i}").value for i in range(len(complete))]
+        # The descriptives, and the SD in particular. It is a dynamic-array
+        # formula (`_xlfn.STDEV.S` over `_xlfn._xlws.FILTER`), the builder
+        # regenerates it, and openpyxl can only confirm the text is right --
+        # whether Excel still evaluates it in a rebuilt file, rather than
+        # showing #NAME?, is only answerable here.
+        descriptives = {
+            row: sheet.range(f"C{row}").value for row in (MEAN_ROW, SD_ROW, N_ROW)
+        }
         book.close()
     finally:
         app.quit()
@@ -660,6 +669,14 @@ def test_excel_computes_what_we_compute(built_sheet, template_shaped_module, mar
         "fix."
     )
     assert letters == list(ours["Letter Grade"])
+
+    marks_awarded = list(complete["Coursework 1 (100)"])
+    assert descriptives[N_ROW] == len(marks_awarded)
+    assert descriptives[MEAN_ROW] == pytest.approx(statistics.mean(marks_awarded))
+    assert descriptives[SD_ROW] == pytest.approx(statistics.stdev(marks_awarded)), (
+        "the SD is a dynamic-array formula; a rebuilt sheet must still "
+        "evaluate it rather than returning an error string"
+    )
 
 
 # --------------------------------------------------------------------------
