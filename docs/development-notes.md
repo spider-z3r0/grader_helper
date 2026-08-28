@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 381 tests:
+Done, 407 tests:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -297,6 +297,9 @@ Done, 381 tests:
 - `init_module` writes a starter `module.toml`, comments and all, and
   creates the folders it describes
 - The assessment folder layout is modelled — see below
+- The departmental sheet is built for whatever assessments a module has,
+  and rebuilding the template's own shape reproduces it cell for cell — see
+  **Building the departmental sheet**
 - The four Excel-writing functions covered and repaired — see below
 - A whole fake module on disk, and an end-to-end test over it
 - Quiz collection: a folder of Brightspace quiz exports folded into one
@@ -382,11 +385,10 @@ assumes the one before it works.
 1. ~~**Quiz / MCQ collection**~~ — done. The rules are recorded in
    `module.toml`, and the walkthrough drives a term of quizzes end to end.
    See **Quiz collection**.
-2. **Write everything to the departmental grade file** — half done.
-   `collate_module_marks` brings a whole module's marks into one frame and
-   `prepare_data_for_departmental_template` puts them in the sheet's shape;
-   what is left is writing that into the department's actual workbook, which
-   needs the workbook. See **Collating a module**.
+2. ~~**Write everything to the departmental grade file**~~ — done.
+   `build_departmental_sheet` lays the workbook out for whatever assessments
+   a module has and `write_departmental_sheet` puts the marks in. See
+   **Building the departmental sheet**.
 3. **Moderation packs** — see **The domain → Moderation**. The internal
    pack is the unit of work: a random sample of *n* per grade band, plus the
    cases the ML flags for a second opinion. The external pack is an assembly
@@ -659,6 +661,101 @@ and refuses — naming the column — when the module has an assessment the
 template has no home for. A module that fits is written; one that does not
 is told so, rather than being half-written.
 
+That is `write_departmental_sheet`. The half it does not solve — a module
+that does not fit — is `build_departmental_sheet`, which makes the home. See
+**Building the departmental sheet**.
+
+### Building the departmental sheet
+
+The template is one module's shape, so any other shape has been reshaped by
+hand — and that is where the marks go wrong. The two places a hand edit fails
+are not random; they are the only two things that move when the assessment
+block changes width:
+
+* the **descriptives at A23** — Mean, SD and N, one formula per column. Add an
+  assessment and the summary needs three more cells that nothing reminds you
+  about. A mean over six of seven components is a perfectly plausible number.
+* the **Letter Grade column and the distribution that reads it** — a nested
+  `IF` ten levels deep, plus eleven `COUNTIF`s pointing at it. Miss one and
+  the distribution reports the cohort as NG.
+
+`build_departmental_sheet(module, template, destination)` lays the block out
+for whatever assessments the module has and re-points everything downstream.
+`write_departmental_sheet(df, module, workbook)` then writes Name, Student ID
+and the raw marks into it — five values a row for the template's shape,
+nothing else.
+
+**It writes formulas, never values.** The weighting, the total, the letter
+grade, the descriptives and the distribution all go in as Excel formulas
+transcribed from the template's own. The sheet still does its own arithmetic
+off its own band table, so it stays the thing our numbers are *checked
+against* rather than a transcript of them. Nothing outside `GradeTemplate` is
+touched, and inside it the band table at A5:E17 and the QPV column are read
+but never written.
+
+#### The guard: rebuild the template and require it back
+
+`tests/test_departmental_sheet.py::test_rebuilds_the_committed_template` gives
+the builder a module of the template's own shape — cw1 100/40, cw2 100/50, MCQ
+10/10 — and asserts the committed template comes back cell for cell: headers,
+every formula in the ruled rows, the descriptives, the distribution and the
+number formats. The only permitted difference is the cleared sample rows.
+
+That is what makes the shapes nobody has a golden copy of trustworthy. The
+letter-grade formula in particular is *generated from the band table in the
+workbook being written*, rows 8–17, so it reproduces the department's string
+exactly and follows them if they retire a band.
+
+#### Two things read off the file that contradicted the obvious choice
+
+**The weighting must divide exactly where it can.** The template writes
+`=C30/100*40` for cw1 and the hand-simplified `=E30/2` for cw2, and the tidier
+thing to do is to write both the long way so the weight is visible in the
+cell. That is wrong, and not cosmetically. `x/2` is exact in binary floating
+point; `x/100*50` is two roundings and is not — they differ by up to 1.4e-14.
+The total is `ROUND(SUM(...),0)`, so a sum landing on an exact half falls the
+other way: at cw2 = 29 the two forms give 14.5 and 14.499999999999998, which
+Excel rounds to **15 and 14**. Thirteen such disagreements exist on a
+half-point mark grid. So: divide by a whole number where the weight goes into
+the marks exactly, and use `/marks_out_of*weight` otherwise. On the template's
+shape that gives the department's two formulas back, character for character.
+`test_the_long_weighting_form_would_have_moved_marks` keeps the evidence.
+
+**Body styling comes from a blank row, not row 30.** The template formats its
+sample rows 30–49 with a number format of `0` and the 481 untouched rows below
+them with `0.00`. The samples are the odd ones out and wrongly so: `E30` holds
+`66.5` and a format of `0` displays it as **67**. Styling is taken from the
+first ruled row the department left empty. Some sample rows also carry a
+highlight fill, which on a real student would read as a flag from the module
+leader.
+
+#### The N row, which looks like a mistake and is not
+
+Row 25 counts the *raw* column in every case: `D25` is `COUNT(C30:C530)`, not
+`COUNT(D30:D530)`. That is deliberate — the weighting formula sits in all 501
+rows, so counting it returns 501 whatever the cohort. `H25` counting `G`
+follows from the same fill and has the same effect. The rule that reproduces
+the template exactly is *the nearest raw column at or before this one*, and it
+is also the honest one: N means "students with a mark", and only a raw column
+knows that.
+
+#### What it refuses
+
+All four refusals guard one failure — a total quietly missing a component,
+which looks exactly like a real mark:
+
+- an assessment the sheet has no column for, named rather than dropped;
+- a column the sheet totals that the module does not account for, because left
+  empty it contributes zero to every student;
+- a cohort larger than the 501 ruled rows, because row 531 is outside every
+  formula on the sheet;
+- an existing destination, unless `overwrite=True`.
+
+Ten of these guards were verified by reintroducing the bug — dropping an
+assessment from the total, pointing N at a formula column, freezing the
+distribution on column I, skipping the clear, writing ids as numbers — and
+watching the test fail.
+
 ### The Excel round trip
 
 `distribute_feedback_sheets`, `save_grader_sheets`,
@@ -920,6 +1017,19 @@ Two things the walkthrough surfaced, neither a bug:
   path for. It bit `test_walkthrough.py`, which works around it by dropping
   the stale binding; `test_import.py` does not catch it because it checks in
   a subprocess. Giving the shim a `__path__` would close it properly.
+- **A blank mark is a zero to the sheet.** Excel's `SUM` reads an empty cell
+  as nothing, so a student with one component unmarked gets a total as though
+  they had scored nil on it, and a letter grade computed from that. This is
+  the department's arithmetic, not ours, and it is not ours to change — but it
+  means a sheet written before all the marking is in reads as a complete set
+  of low grades. `write_departmental_sheet` leaves a missing mark blank rather
+  than writing 0, so at least the empty cell is visible.
+- **Nothing has run the generated sheet through a real Excel yet.**
+  `test_excel_computes_what_we_compute` is written and carries the `excel`
+  marker, so it is skipped on Linux CI — which is everywhere it has been run
+  so far. It is the only test where our arithmetic and the sheet's actually
+  meet, and it needs running on Windows before the builder is trusted with a
+  live cohort.
 - A `.pyc` is tracked despite `.gitignore` listing `__pycache__/`. Ignore
   rules do not apply to already-tracked files: `git rm --cached` it.
 

@@ -46,6 +46,7 @@ should show the import line.
 | `module.toml`, models, paths | **module.toml**, **The assessment folder layout** |
 | Brightspace folder names | **Sources of truth → Brightspace formats** |
 | the Excel read/write functions | **The Excel round trip** |
+| writing the departmental sheet | **Building the departmental sheet** |
 | quizzes, pass marks, free passes | **Quiz collection** |
 | what to build next | **Next** |
 | something looks broken | **Known gaps** — it may be known |
@@ -75,6 +76,10 @@ setup and marimo walkthrough; you rarely need it.
   domain**.
 - `alphabetise_folders` returns `None` and writes `folder_rename_log.csv`;
   the handoff to `brightspace_name_folders` is that file, not a value.
+- The departmental sheet's weighting formula **divides by a whole number
+  where it can** (`=E30/2`, not `=E30/100*50`). The long form looks tidier
+  and moves marks: `x/2` is exact in floating point and `x/100*50` is not,
+  and the total is rounded. See **Building the departmental sheet**.
 - `notebooks/grading_walkthrough.py` is deliberately plain and explicit, with
   each assessment written out in full. Do not "improve" it into a selector;
   that is scheduled, and not yet.

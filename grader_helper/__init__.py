@@ -60,6 +60,9 @@ from .file_operations.extract_studentid_grade import extract_studentid_grade
 from .file_operations.catch_grades import catch_grades
 from .file_operations.brightspace_name_folders import brightspace_name_folders
 from .file_operations.scan_multiple_submissions import make_sub_date, scan_multiple_subs
+from .file_operations.departmental_layout import DepartmentalLayout
+from .file_operations.build_departmental_sheet import build_departmental_sheet
+from .file_operations.write_departmental_sheet import write_departmental_sheet
 
 __all__ = [
     "Assessment",
@@ -99,5 +102,8 @@ __all__ = [
     "brightspace_name_folders",
     "make_sub_date",
     "scan_multiple_subs",
-    "find_unsubmitted"
+    "find_unsubmitted",
+    "DepartmentalLayout",
+    "build_departmental_sheet",
+    "write_departmental_sheet",
 ]

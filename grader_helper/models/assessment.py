@@ -232,7 +232,7 @@ class Assessment(BaseModel):
     @property
     def raw_column(self) -> str:
         """The column holding the mark as awarded, e.g. 'Coursework 1 (100)'."""
-        return f"{self.name} ({_tidy(self.marks_out_of)})"
+        return f"{self.name} ({tidy_number(self.marks_out_of)})"
 
     @property
     def weighted_column(self) -> str | None:
@@ -244,7 +244,7 @@ class Assessment(BaseModel):
         """
         if self.marks_out_of == self.weight:
             return None
-        return f"{self.name} ({_tidy(self.weight)})"
+        return f"{self.name} ({tidy_number(self.weight)})"
 
     @property
     def columns(self) -> list[str]:
@@ -305,6 +305,11 @@ class Assessment(BaseModel):
         return (self.folder_path, self.submissions_path, self.grading_output_path)
 
 
-def _tidy(value: float) -> str:
-    """Render a weight the way the grade sheet does: 40, not 40.0."""
+def tidy_number(value: float) -> str:
+    """Render a number the way the grade sheet does: 40, not 40.0.
+
+    Shared with the sheet builder, which puts the same two numbers into the
+    weighting formula -- ``=C30/100*40``. The column header and the formula
+    that reads it have to agree, so they render through one function.
+    """
     return str(int(value)) if float(value).is_integer() else str(value)

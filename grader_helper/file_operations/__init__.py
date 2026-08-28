@@ -9,6 +9,9 @@ from .save_grader_sheets import save_grader_sheets
 from .extract_studentid_grade import extract_studentid_grade
 from .catch_grades import catch_grades
 from .brightspace_name_folders import brightspace_name_folders
+from .departmental_layout import DepartmentalLayout
+from .build_departmental_sheet import build_departmental_sheet
+from .write_departmental_sheet import write_departmental_sheet
 
 
 __all__ = [
@@ -20,4 +23,7 @@ __all__ = [
     "extract_studentid_grade",
     "catch_grades",
     "brightspace_name_folders",
+    "DepartmentalLayout",
+    "build_departmental_sheet",
+    "write_departmental_sheet",
 ]
