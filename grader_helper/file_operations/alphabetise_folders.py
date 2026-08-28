@@ -112,7 +112,7 @@ def alphabetise_folders(df: pd.DataFrame, subs_folder: pl.Path, verbose: bool = 
 
             rename_attempts.append(
                 {
-                    "Original Name": folder.name,
+                    "Original Name": folder.name.title(),
                     "Suggested Name": new_folder_name,
                     "Outcome": "Renamed",
                     "Error": None,
