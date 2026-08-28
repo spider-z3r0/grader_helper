@@ -97,6 +97,34 @@ def test_the_walkthrough_runs_and_collects_the_quizzes(walkthrough):
     assert collected["23304309"] == 0, "the non-participant must not be given a free pass"
     assert collected["23304308"] == 10, "nine passes plus the free pass, capped"
 
+    # The module, not just the assessments: the notebook now ends by
+    # collating all three and banding the totals.
+    #
+    # Not compared against fake.expected -- the notebook's own grader cells
+    # write synthetic marks into the feedback sheets, so expected is the
+    # truth for the quiz column and nothing else. What is checked instead is
+    # internal consistency: every enrolled student reaches the sheet, the
+    # departmental columns are there, the quiz marks survived the collation,
+    # and every letter grade is the one its own total earns.
+    graded = walkthrough["module_sheet"].set_index("Student ID")
+
+    assert set(graded.index) == set(fake.expected["Student ID"])
+    assert list(graded.columns) == [
+        "Name",
+        "Coursework 1 (100)", "Coursework 1 (40)",
+        "Coursework 2 (100)", "Coursework 2 (50)",
+        "Quizzes (10)",
+        "Total % Grade", "Letter Grade",
+    ]
+    assert graded["Quizzes (10)"].to_dict() == collected.to_dict()
+
+    from grader_helper import make_letter_grade
+
+    assert graded["Letter Grade"].to_dict() == {
+        student: make_letter_grade(total)
+        for student, total in graded["Total % Grade"].items()
+    }
+
     # And the progress each section records. All three, because cw1 went
     # without a record_progress cell until someone ran the notebook to the
     # end and read its own status output back.

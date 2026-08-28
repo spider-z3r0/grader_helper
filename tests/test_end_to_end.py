@@ -19,7 +19,7 @@ import pandas as pd
 import pytest
 
 from grader_helper import (
-    calculate_weighted_score,
+    collate_module_marks,
     catch_grades,
     import_brightspace_classlist,
     load_module,
@@ -30,27 +30,25 @@ from grader_helper import (
 
 @pytest.fixture
 def departmental_sheet(fake_module):
-    """Drive the whole pipeline, and return what comes out the end."""
+    """Drive the whole pipeline, and return what comes out the end.
+
+    This used to be a hand-rolled loop: fetch each assessment with
+    catch_grades, merge, then weight. That loop was the prototype
+    collate_module_marks was extracted from, and it could only ever read an
+    assessment marked on a feedback sheet -- put a quiz in the module and it
+    had nothing to read. The assertions below are unchanged, so what they
+    now check is that the real function reproduces the prototype exactly.
+
+    source="feedback" because that is what the prototype read: the marks the
+    students received. The grader round trip does not run in this fixture,
+    so there is no collated file to read instead.
+    """
     module = load_module(fake_module.root)
     classlist = import_brightspace_classlist(fake_module.classlist)
 
-    df = classlist[["Student ID", "Last Name", "First Name"]].copy()
-    df["Name"] = df["First Name"] + " " + df["Last Name"]
-    df = df[["Student ID", "Name"]]
-
-    for assessment in module.assessments:
-        marks = catch_grades(
-            fake_module.submissions[assessment.id], fake_module.grade_cell
-        ).rename(columns={"grade": assessment.raw_column})
-        df = df.merge(marks, on="Student ID", how="left")
-
-    for assessment in module.assessments:
-        if assessment.needs_weighting:
-            assert calculate_weighted_score(
-                df, assessment.raw_column, assessment.weight_fraction()
-            ) is None
-
-    return prepare_data_for_departmental_template(df, module)
+    return prepare_data_for_departmental_template(
+        collate_module_marks(module, classlist, source="feedback"), module
+    )
 
 
 # ---------------------------------------------------------------------------

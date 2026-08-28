@@ -20,9 +20,11 @@ with app.setup():
         catch_grades,
         distribute_feedback_sheets,
         extract_studentid_grade,
+        collate_module_marks,
         collect_quiz_marks,
         import_brightspace_classlist,
         ingest_completed_graderfiles,
+        prepare_data_for_departmental_template,
         read_quiz,
         save_distributed_graders,
         save_grader_sheets,
@@ -739,6 +741,69 @@ def quiz_record_progress(HANDLE):
 
     status3 = ModuleFile.load(ROOT).module.assessment(ASSESSMENT_3_ID).status
     status3.model_dump()
+    return
+
+
+@app.cell
+def the_whole_module():
+    mo.md(
+        """
+        ## The module
+
+        Everything above is one assessment at a time. This is the module: the
+        three sets of marks in one frame, totalled, and turned into letter
+        grades.
+
+        `collate_module_marks` is the only thing here that walks a whole
+        module, and it fetches each assessment's marks from wherever that
+        kind of assessment keeps them -- the courseworks off their feedback
+        sheets, the quizzes out of Brightspace's exports. It decides that by
+        asking what the assessment *has*, not what its `type` says, because
+        an MCQ can be sat in Brightspace, on a feedback sheet, or on paper in
+        a lecture theatre, and all three are `type = "mcq"`.
+        """
+    )
+    return
+
+
+@app.cell
+def collate_the_whole_module(MODULE, cl):
+    """MODULE LEADER -- every assessment's marks, in one frame."""
+    # source="feedback" reads what the students received. The other record is
+    # source="collated", the completed_grades.xlsx the graders' sheets were
+    # collated into. They must agree -- that is what the reconciliation above
+    # checks -- and this deliberately will not fall back from one to the
+    # other, because a substitution nobody asked for is invisible.
+    module_marks = collate_module_marks(MODULE, cl, source="feedback")
+
+    module_marks
+    return (module_marks,)
+
+
+@app.cell
+def the_departmental_sheet(MODULE, module_marks):
+    """MODULE LEADER -- totalled, banded, in the department's column order."""
+    module_sheet = prepare_data_for_departmental_template(module_marks, MODULE)
+
+    module_sheet
+    return (module_sheet,)
+
+
+@app.cell
+def look_at_the_edges(module_sheet):
+    graded = module_sheet.set_index("Student ID")
+
+    mo.md(f"""
+    | student | total | grade | why |
+    |---|---|---|---|
+    | 23304305 Egan | {graded.loc["23304305", "Total % Grade"]} | {graded.loc["23304305", "Letter Grade"]} | totals exactly 64.5. Excel rounds half away from zero and says 65 (B2); Python's own round says 64 (B3). The sheet is the source of truth, so `excel_round` is what runs |
+    | 23304309 Joyce | {graded.loc["23304309", "Total % Grade"]} | {graded.loc["23304309", "Letter Grade"]} | scored zero on everything and sat no quiz. NG, not F -- no participation is a different thing from a mark of zero |
+    | 23304311 Lynch | {graded.loc["23304311", "Total % Grade"]} | {graded.loc["23304311", "Letter Grade"]} | never submitted, and still on the sheet. A student missing from the sheet has no grade at all, which nobody notices |
+
+    Writing this into the department's own workbook is the next piece, and it
+    needs the workbook: `paths.departmental_sheet` in `module.toml` is where
+    it goes.
+    """)
     return
 
 

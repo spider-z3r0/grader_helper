@@ -47,6 +47,9 @@ from .dataframe_operations.prepare_data_for_departmental_template import (
     prepare_data_for_departmental_template,
 )
 
+# collating -- the assembly layer, above the packages it reaches into
+from .collating import collate_module_marks
+
 # file operations
 from .file_operations.distribute_feedback_sheets import distribute_feedback_sheets
 from .file_operations.distribute_feedback_sheets import distribute_feedback_sheets_groups
@@ -92,6 +95,7 @@ __all__ = [
     "sort_order_columns",
     "check_for_weighted_columns",
     "prepare_data_for_departmental_template",
+    "collate_module_marks",
     "brightspace_name_folders",
     "make_sub_date",
     "scan_multiple_subs",

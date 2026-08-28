@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 357 tests:
+Done, 376 tests:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -302,6 +302,8 @@ Done, 357 tests:
 - Quiz collection: a folder of Brightspace quiz exports folded into one
   mark, with the rules recorded in `module.toml` -- see below. The first
   polars in the package
+- `collate_module_marks`: a whole module's marks in one frame, whatever
+  kind of assessment they came from -- see below
 
 ### The rewire onto `Module`
 
@@ -380,10 +382,11 @@ assumes the one before it works.
 1. ~~**Quiz / MCQ collection**~~ — done. The rules are recorded in
    `module.toml`, and the walkthrough drives a term of quizzes end to end.
    See **Quiz collection**.
-2. **Write everything to the departmental grade file** — the pieces exist
-   (`prepare_data_for_departmental_template` is golden-tested); what is
-   missing is getting a whole module's collated marks into the actual
-   workbook.
+2. **Write everything to the departmental grade file** — half done.
+   `collate_module_marks` brings a whole module's marks into one frame and
+   `prepare_data_for_departmental_template` puts them in the sheet's shape;
+   what is left is writing that into the department's actual workbook, which
+   needs the workbook. See **Collating a module**.
 3. **Moderation packs** — see **The domain → Moderation**. The internal
    pack is the unit of work: a random sample of *n* per grade band, plus the
    cases the ML flags for a second opinion. The external pack is an assembly
@@ -531,6 +534,63 @@ The fold is polars throughout; the return is pandas, because that is what
 the rest of the pipeline reads. The conversion goes through Python lists
 rather than `to_pandas()`, which would pull in pyarrow for a frame of a few
 hundred rows.
+
+### Collating a module
+
+Every other step in this package works on one assessment.
+`collate_module_marks` is the one that works on the module: it walks the
+assessments, fetches each one's marks from wherever that kind of assessment
+keeps them, and returns a frame ready for
+`prepare_data_for_departmental_template`.
+
+It was extracted from a loop that lived inside a **test fixture**
+(`tests/test_end_to_end.py`), which is where the only whole-module code in
+the project had been sitting. That loop called `catch_grades` for every
+assessment, so it could only ever read an assessment marked on a feedback
+sheet — put a quiz in the module and there was nothing for it to read. The
+fixture now calls the real function and its assertions are unchanged, so
+what they check is that the extraction reproduced the prototype exactly.
+
+**It lives at the top level, not in `dataframe_operations`.** That package
+depends on nothing but `models`, and collation reaches into `ingesting` and
+`file_operations`; putting it there would have inverted the layering.
+
+#### What decides where a mark comes from
+
+Not the assessment's `type`. An MCQ can be sat in Brightspace, written on a
+feedback sheet, or done on paper in a lecture theatre, and all three are
+`type = "mcq"` — so asking what an assessment *has* answers the question and
+asking what it *is* does not. In order: marks handed in through `marks=`, a
+`grade_cell` (the feedback-sheet workflow), then quiz exports in the
+submissions folder. Anything else gets an empty column and a warning naming
+it, because an assessment that quietly vanished would take a component out
+of every total.
+
+That order was found the hard way, and only by running the walkthrough.
+`alphabetise_folders` writes `folder_rename_log.csv` **into the submissions
+folder** — it is the handoff to `brightspace_name_folders` — so every
+alphabetised coursework has a .csv sitting beside the submission folders.
+Checking for exports first sent cw1 down the quiz path, where it failed
+complaining that it had no pass mark: an error about the wrong assessment
+entirely, in a step the reader was not thinking about. Two fixes, both kept:
+a `grade_cell` now settles it before the folder is looked at, and the export
+check ignores the files this package itself writes there.
+
+#### The two records, and why there is no fallback
+
+A marked coursework exists in two places and they mean different things:
+`completed_grades.xlsx` is what the **department** receives, the feedback
+sheets are what the **students** received. Step 7 reconciles them, and they
+must agree — which makes it tempting to let a missing collated file fall
+back to the feedback sheets. It does not. The fallback would be invisible,
+and "the record I meant was not there so I used the other one" is the same
+class of silent substitution as everything else this package refuses. A
+missing collated file raises and names both ways out.
+
+That invariant is now a test: collating a reconciled module from either
+record gives the same frame. Writing it turned up the honest version of the
+same point — the first draft of the fixture wrote a mark for the student who
+never submitted, the two records disagreed, and the test was right to fail.
 
 ### The Excel round trip
 
