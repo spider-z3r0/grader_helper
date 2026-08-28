@@ -151,6 +151,7 @@ def build_departmental_sheet(
     worksheet = workbook[sheet]
 
     band_letters = _read_band_letters(worksheet)
+    _check_the_top_band_is_reachable(worksheet)
     grades = _read_distribution_grades(worksheet)
     styles = _template_styles(worksheet)
     widths = _template_widths(worksheet)
@@ -189,6 +190,58 @@ def _read_band_letters(worksheet: Worksheet) -> list[str]:
             "cannot be built from an incomplete table."
         )
     return letters  # type: ignore[return-value]
+
+
+def _check_the_top_band_is_reachable(worksheet: Worksheet) -> None:
+    """Refuse a template whose top band excludes its own upper bound.
+
+    The band table says A1 runs from ``$A$17`` to ``$B$17`` -- 80 to 100,
+    inclusive at both ends. The letter-grade formula has to close that last
+    band with ``<=``, because it is the only band with nothing above it: every
+    other one is closed by the band that follows. A template closing it with
+    ``<`` matches no band at exactly 100, so a total of 100 falls through the
+    whole nested IF to the final ``"NG"`` -- a student with full marks
+    recorded as *no participation*.
+
+    Two copies of the 2026 template are in circulation and they differ by
+    exactly this character, in this cell and nowhere else, which is why this
+    is checked rather than assumed.
+
+    It is refused rather than corrected. The builder regenerates this formula
+    and would otherwise emit the ``<=`` form silently, quietly overruling the
+    department's file -- and a package that substitutes its own arithmetic
+    without saying so is the thing every other guard here exists to prevent.
+    Refusing puts the one-character fix in front of whoever owns the
+    template.
+    """
+    roles = _template_roles(worksheet)
+    cell = worksheet.cell(row=FIRST_DATA_ROW, column=roles[_LETTER])
+    formula = cell.value
+    if not isinstance(formula, str):
+        return  # no letter-grade formula to read; nothing to contradict
+
+    upper = f"$B${LAST_BAND_ROW}"
+    if f"<={upper}" in formula or f">={upper}" in formula:
+        return
+    if f"<{upper}" not in formula:
+        return
+
+    letter = worksheet.cell(row=LAST_BAND_ROW, column=BAND_LETTER_COLUMN).value
+    bound = worksheet.cell(row=LAST_BAND_ROW, column=2).value
+    raise ValueError(
+        f"This template's letter-grade formula ({cell.coordinate}) closes the "
+        f"top band with '<{upper}' rather than '<={upper}', so a total of "
+        f"exactly {bound} matches no band and falls through to \"NG\".\n"
+        f"The band table says {letter!r} runs to {bound} inclusive "
+        f"(row {LAST_BAND_ROW}), so the formula contradicts the table beside "
+        "it: a student with full marks would be recorded as no "
+        "participation.\n"
+        f"Fix the template -- change '<' to '<=' before {upper} in the "
+        f"{cell.coordinate} formula and fill it down -- or use a copy that "
+        "already has. This is refused rather than corrected here, because "
+        "silently rewriting the department's own arithmetic is exactly what "
+        "this package refuses to do."
+    )
 
 
 def _read_distribution_grades(worksheet: Worksheet) -> list[tuple[int, str]]:

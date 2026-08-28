@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 410 tests:
+Done, 412 tests:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -776,6 +776,38 @@ them with `0.00`. The samples are the odd ones out and wrongly so: `E30` holds
 first ruled row the department left empty. Some sample rows also carry a
 highlight fill, which on a real student would read as a flag from the module
 leader.
+
+#### Two templates are in circulation, and they grade 100 differently
+
+Found by comparing a working copy against the committed one. They differ by
+**one character, in one cell** (filled down 501 rows), in the letter-grade
+formula:
+
+```
+committed:  ...ROUND(H30,2)<=$B$17),"A1","NG")
+the other:  ...ROUND(H30,2)< $B$17),"A1","NG")
+```
+
+`$B$17` is 100. Every band but the last is closed by the band above it; A1
+has nothing above it, so it has to close with `<=`. With `<`, a total of
+exactly 100 matches no band and falls through the whole nested `IF` to the
+final `"NG"` — **a student with full marks recorded as no participation.**
+
+The committed copy is the correct one: it agrees with the band table beside
+it, which gives A1 an upper bound of 100, and with `make_letter_grade`. The
+golden samples top out at 75, which is why nothing had ever exercised the
+boundary.
+
+`build_departmental_sheet` **refuses** a template with the `<` form rather
+than correcting it. It regenerates the formula, so it would otherwise emit
+the right one silently and overrule the department's file without saying so
+— and a package that substitutes its own arithmetic quietly is what every
+other guard here exists to prevent. The refusal names the cell and the
+one-character fix.
+
+Worth knowing which copy the department actually issues. If it is the `<`
+one, that is a live defect in their file rather than something to work
+around.
 
 #### The N row, which looks like a mistake and is not
 

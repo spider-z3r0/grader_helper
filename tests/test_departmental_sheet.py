@@ -660,3 +660,68 @@ def test_excel_computes_what_we_compute(built_sheet, template_shaped_module, mar
         "fix."
     )
     assert letters == list(ours["Letter Grade"])
+
+
+# --------------------------------------------------------------------------
+# The two templates in circulation.
+
+
+@pytest.fixture
+def template_with_an_unreachable_top_band(template, tmp_path) -> pl.Path:
+    """The other 2026 template: A1 closed with '<' instead of '<='.
+
+    Two copies of the departmental template exist and differ by exactly this
+    character, in the letter-grade column and nowhere else. Built here from
+    the committed one so the difference is stated in code rather than a second
+    binary being committed to prove a point.
+    """
+    from openpyxl import load_workbook as _load
+
+    book = _load(template)
+    worksheet = book["GradeTemplate"]
+    for row in range(FIRST_DATA_ROW, LAST_DATA_ROW + 1):
+        cell = worksheet.cell(row, 9)
+        cell.value = cell.value.replace("<=$B$17", "<$B$17")
+    path = tmp_path / "other template.xlsx"
+    book.save(path)
+    return path
+
+
+def test_refuses_a_template_whose_top_band_excludes_a_perfect_score(
+    template_with_an_unreachable_top_band, template_shaped_module, tmp_path
+):
+    """A total of exactly 100 must not come out as NG.
+
+    Every band but the last is closed by the one above it; A1 has nothing
+    above it, so it has to close with '<='. With '<' a total of 100 matches
+    no band and falls through the nested IF to the final "NG" -- full marks
+    recorded as no participation.
+
+    The builder regenerates this formula, so without the guard it would emit
+    the correct form silently and overrule the department's file without
+    saying so. It refuses instead.
+    """
+    with pytest.raises(ValueError, match="falls through"):
+        build_departmental_sheet(
+            template_shaped_module,
+            template_with_an_unreachable_top_band,
+            tmp_path / "out.xlsx",
+        )
+
+
+def test_the_committed_template_grades_a_perfect_score_as_a1(template):
+    """The band table and the formula beside it have to agree.
+
+    Read off the committed file rather than asserted about our own code: row
+    17 says A1 runs to 100 inclusive, and the formula must include 100 too.
+    """
+    worksheet = load_workbook(template)["GradeTemplate"]
+
+    assert worksheet.cell(17, 1).value == 80
+    assert worksheet.cell(17, 2).value == 100
+    assert worksheet.cell(17, 3).value == "A1"
+    assert "<=$B$17" in worksheet["I30"].value
+
+    from grader_helper import make_letter_grade
+
+    assert make_letter_grade(100) == "A1", "our code must agree with the sheet"
