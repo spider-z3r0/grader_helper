@@ -21,11 +21,48 @@ folder name, so
     27236-46025 - 23304302 BARRY - 01 MARCH 2026 600 PM     came back
 
 on 11 of 12 folders. Upper case belongs in the lookup key only.
+
+That defect is fixed, but its damage outlives it. ``alphabetise_folders``
+**appends** to the rename log and never clears it, so ``Original Name`` is a
+permanent record of what the folders were called the first time they were
+alphabetised. Folders renamed by the broken version, alphabetised again
+afterwards, put upper-cased names into the log as though Brightspace had
+written them that way -- and every restore since has faithfully put them
+back. The code is right and the data is poisoned, which is why
+:class:`StaleRenameLogError` exists: a log Brightspace cannot have produced
+is refused rather than obeyed.
 """
 
 from typing import NamedTuple
 
 from ..dependencies import pd, pl
+
+
+class StaleRenameLogError(ValueError):
+    """Raised when the rename log holds names Brightspace did not write.
+
+    Its own type, and deliberately fatal rather than a warning: the whole
+    job of this function is to put back the exact name a student's work
+    arrived under, and a log that cannot be trusted makes every name it
+    writes wrong. Carrying on would rename real folders to names nobody
+    chose, which is worse than stopping.
+    """
+
+
+def looks_upper_cased(name: str) -> bool:
+    """Whether a logged original was written by the upper-casing version.
+
+    A Brightspace folder name always carries a month written out --
+    ``"05 March 2026"`` -- so a real one has lower-case letters in it. One
+    with none at all did not come from Brightspace.
+
+    >>> looks_upper_cased("27236-46025 - 23304308 ANGOOD - 05 MARCH 2026 612 PM")
+    True
+    >>> looks_upper_cased("27236-46025 - 23304308 Angood - 05 March 2026 612 PM")
+    False
+    """
+    text = str(name)
+    return any(c.isalpha() for c in text) and text == text.upper()
 
 #: Written beside the submissions, as before.
 LOG_FILENAME = "folder_brightspace_name_log.csv"
@@ -89,6 +126,31 @@ def brightspace_name_folders(
             "takes the log alphabetise_folders wrote "
             "('folder_rename_log.csv' in the submissions folder), not the "
             f"class list. Columns given: {list(df.columns)}."
+        )
+
+    poisoned = sorted(
+        {
+            str(original)
+            for original in df["Original Name"]
+            if pd.notna(original) and looks_upper_cased(original)
+        }
+    )
+    if poisoned:
+        listed = "\n".join(f"  {name}" for name in poisoned[:10])
+        raise StaleRenameLogError(
+            f"{len(poisoned)} row(s) in the rename log record an original "
+            "name with no lower-case letters in it:\n"
+            f"{listed}"
+            + (f"\n  ... and {len(poisoned) - 10} more" if len(poisoned) > 10 else "")
+            + "\n\nBrightspace writes the month out in full, so a real name "
+            "has lower case in it. These came from the version of "
+            "alphabetise_folders that upper-cased the log, and because the "
+            "log is appended to and never cleared they will be restored "
+            "every time this runs. Nothing has been renamed.\n"
+            "Delete folder_rename_log.csv, re-download the submissions from "
+            "Brightspace, and alphabetise again -- that is the only way to "
+            "recover the names as Brightspace wrote them. Title-casing them "
+            "looks right and is not: it turns MACDONALD into Macdonald."
         )
 
     # Upper case in the KEY only. The value keeps the case Brightspace used,

@@ -4,6 +4,8 @@
 import pandas as pd
 import pathlib as pl
 import re
+import warnings
+from .brightspace_name_folders import looks_upper_cased
 from .scan_multiple_submissions import scan_multiple_subs
 
 
@@ -73,6 +75,27 @@ def alphabetise_folders(df: pd.DataFrame, subs_folder: pl.Path, verbose: bool = 
         if verbose:
             print(f"Found existing rename log at {log_path}, appending new entries.")
         renames = pd.read_csv(log_path)
+
+        # The log is appended to and never cleared, so anything wrong in it
+        # is wrong forever. Rows written by the version that upper-cased the
+        # log will be restored to Brightspace on every future run --
+        # brightspace_name_folders refuses them outright, but by then the
+        # append has already happened, so say so here too.
+        stale = [
+            str(name)
+            for name in renames.get("Original Name", [])
+            if pd.notna(name) and looks_upper_cased(name)
+        ]
+        if stale:
+            warnings.warn(
+                f"{len(stale)} row(s) in {log_path.name} record an original "
+                "name with no lower-case letters -- Brightspace writes the "
+                "month out in full, so these did not come from it. They are "
+                "left over from the version that upper-cased the log, and "
+                "brightspace_name_folders will refuse to restore them. "
+                "Delete the log and re-download to recover the real names.",
+                stacklevel=2,
+            )
     else:
         if verbose:
             print(f"No existing rename log found. Creating new log at {log_path}.")
@@ -112,7 +135,7 @@ def alphabetise_folders(df: pd.DataFrame, subs_folder: pl.Path, verbose: bool = 
 
             rename_attempts.append(
                 {
-                    "Original Name": folder.name.title(),
+                    "Original Name": folder.name,
                     "Suggested Name": new_folder_name,
                     "Outcome": "Renamed",
                     "Error": None,

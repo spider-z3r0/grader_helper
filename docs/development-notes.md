@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 376 tests:
+Done, 381 tests:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -744,6 +744,40 @@ already correct, what was unrecognised, what failed.
 The guarantee the tests hold is the round trip: what Brightspace gave us,
 `alphabetise_folders` renamed, and this hands back character for character.
 Written red first, and all seven failed against the old code.
+
+#### The damage outlives the defect
+
+The bug is fixed; a log written while it was live is not. `alphabetise_folders`
+**appends** to `folder_rename_log.csv` and never clears it, so `Original Name`
+is a permanent record of what the folders were called the first time they were
+alphabetised. Folders renamed by the broken version and alphabetised again put
+upper-cased names into the log *as though Brightspace had written them that
+way*, and every restore since puts them faithfully back. Correct code, poisoned
+data.
+
+That surfaced as a real report — the originals were still coming back
+upper-cased — and the first fix for it was `.title()` on the logged name. It
+makes the symptom disappear and quietly costs more than it saves:
+
+| stored | restored |
+|---|---|
+| `MACDONALD` | `Macdonald` |
+| `MCGRATH` | `Mcgrath` |
+| `O'BRIEN` | `O'Brien` |
+| `612 PM` | `612 Pm` |
+
+In a department where those are ordinary surnames, that is not a cosmetic
+difference. Three tests caught it, which is the round-trip guard doing exactly
+the job it was written for.
+
+So `brightspace_name_folders` now **refuses** a log it can tell Brightspace did
+not write, before renaming anything: `StaleRenameLogError`. The tell is that
+Brightspace writes the month out in full, so a real name has lower case in it
+somewhere — an all-caps surname alone is not enough to trip it.
+`alphabetise_folders` warns about the same rows when it appends to such a log,
+because by the time the restore refuses, the append has already happened. The
+only real recovery is to delete the log and re-download; nothing can
+reconstruct a name that was overwritten.
 
 ### The fake module, and the end-to-end test
 

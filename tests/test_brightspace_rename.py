@@ -20,8 +20,11 @@ import pandas as pd
 import pytest
 
 from grader_helper import alphabetise_folders, import_brightspace_classlist
+from conftest import brightspace_folder_name
 from grader_helper.file_operations.brightspace_name_folders import (
+    StaleRenameLogError,
     brightspace_name_folders,
+    looks_upper_cased,
 )
 
 #: As Brightspace writes them: mixed case surname, mixed case month.
@@ -171,3 +174,77 @@ def test_matching_ignores_case(subs, rename_log):
     brightspace_name_folders(rename_log, subs)
 
     assert folders(subs) == sorted(BRIGHTSPACE_NAMES)
+
+
+# ---------------------------------------------------------------------------
+# A log left behind by the upper-casing version
+# ---------------------------------------------------------------------------
+#
+# The defect itself is fixed, but its damage outlives it: alphabetise_folders
+# appends to the log and never clears it, so `Original Name` is a permanent
+# record of what the folders were called the first time they were
+# alphabetised. Folders renamed by the broken version and alphabetised again
+# put upper-cased names into the log as though Brightspace had written them
+# that way, and every restore since puts them faithfully back.
+
+
+def a_stale_log() -> pd.DataFrame:
+    """The log as the upper-casing version left it."""
+    return pd.DataFrame(
+        [
+            {
+                "Original Name": "27236-46025 - 23304308 ANGOOD - 05 MARCH 2026 612 PM",
+                "Suggested Name": "ANGOOD, ISEULT(23304308)",
+                "Outcome": "Renamed",
+                "Error": None,
+            }
+        ]
+    )
+
+
+def test_a_log_brightspace_cannot_have_written_is_refused(tmp_path):
+    """Fatal, not a warning. Every name it would write is wrong."""
+    (tmp_path / "ANGOOD, ISEULT(23304308)").mkdir()
+
+    with pytest.raises(StaleRenameLogError, match="no lower-case letters"):
+        brightspace_name_folders(a_stale_log(), tmp_path)
+
+
+def test_nothing_is_renamed_when_the_log_is_refused(tmp_path):
+    """The refusal has to come before any folder is touched, or it is just
+    a slower version of the damage."""
+    folder = tmp_path / "ANGOOD, ISEULT(23304308)"
+    folder.mkdir()
+
+    with pytest.raises(StaleRenameLogError):
+        brightspace_name_folders(a_stale_log(), tmp_path)
+
+    assert folder.exists()
+
+
+def test_the_message_says_how_to_recover(tmp_path):
+    """Deleting the log and re-downloading, not title-casing -- which looks
+    right and turns MACDONALD into Macdonald."""
+    (tmp_path / "ANGOOD, ISEULT(23304308)").mkdir()
+
+    with pytest.raises(StaleRenameLogError, match="re-download"):
+        brightspace_name_folders(a_stale_log(), tmp_path)
+
+
+def test_a_real_brightspace_name_is_not_mistaken_for_a_stale_one(tmp_path):
+    """The month written out in full is what tells them apart."""
+    assert not looks_upper_cased("27236-46025 - 23304308 Angood - 05 March 2026 612 PM")
+    assert looks_upper_cased("27236-46025 - 23304308 ANGOOD - 05 MARCH 2026 612 PM")
+    # An all-caps SURNAME alone is not the tell -- the month still reads.
+    assert not looks_upper_cased("27236-46025 - 23304308 ANGOOD - 05 March 2026 612 PM")
+
+
+def test_alphabetising_onto_a_stale_log_warns(tmp_path, classlist, fake_students):
+    """The append has already happened by the time the restore refuses, so
+    the warning belongs here too."""
+    sid, first, last = fake_students[0]
+    (tmp_path / brightspace_folder_name(sid, last)).mkdir()
+    a_stale_log().to_csv(tmp_path / "folder_rename_log.csv", index=False)
+
+    with pytest.warns(UserWarning, match="lower-case"):
+        alphabetise_folders(classlist, tmp_path)
