@@ -288,3 +288,45 @@ def test_the_third_module_sheet_carries_every_component(walkthrough):
     assert worksheet["G30"].value == "=F30/5", "100 worth 20 divides exactly"
     assert worksheet["K30"].value.startswith("=IF(ROUND(J30,2)>0,")
     assert worksheet["H6"].value == '=COUNTIF(K30:K530,"A1")'
+
+
+def test_the_walkthrough_moderates_the_third_module(walkthrough):
+    """The pack the notebook builds, and the seed that justifies it.
+
+    The load-bearing assertion is the last one. A draw nobody can reproduce
+    cannot answer "why was this student moderated?", and the manifest is
+    what carries the answer.
+    """
+    moderation = walkthrough["moderation"]
+    pack = walkthrough["pack"]
+
+    # One per band, no non-participants, and the borderline cases as well.
+    bands = set(moderation.selected["Letter Grade"])
+    assert "NG" not in bands, "a student who submitted nothing has nothing to moderate"
+    assert bands, "the draw selected nobody"
+
+    reasons = " ".join(moderation.selected["Selected Because"])
+    assert "drawn" in reasons
+    assert "borderline" in reasons, "the notebook asks for borderline='include'"
+
+    # Only the coursework has anything to copy; the other three assessments
+    # have no submissions folder and are skipped rather than failing.
+    assert set(pack.copied) == {"cw1"}
+    assert pack.manifest.is_file()
+
+    from grader_helper import read_moderation_manifest, sample_for_moderation
+
+    manifest = read_moderation_manifest(pack.root)
+    assert len(manifest) == len(moderation.selected)
+    assert set(manifest["Seed"]) == {moderation.seed}
+
+    # And the recorded seed really does reproduce the draw.
+    again = sample_for_moderation(
+        walkthrough["module_3_sheet"],
+        n=1,
+        borderline="include",
+        seed=int(manifest["Seed"].iloc[0]),
+    )
+    assert again.selected["Student ID"].tolist() == (
+        moderation.selected["Student ID"].tolist()
+    )

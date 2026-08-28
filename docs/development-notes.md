@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 418 tests on Linux and 419 with a real Excel:
+Done, 451 tests on Linux and 452 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -389,13 +389,12 @@ assumes the one before it works.
    `build_departmental_sheet` lays the workbook out for whatever assessments
    a module has and `write_departmental_sheet` puts the marks in. See
    **Building the departmental sheet**.
-3. **Moderation packs** — see **The domain → Moderation**. The internal
-   pack is the unit of work: a random sample of *n* per grade band, plus the
-   cases the ML flags for a second opinion. The external pack is an assembly
-   over the internal ones, so internal packs must be kept rather than
-   discarded. Two decisions first, both the ML's: what *n* is as a function
-   of cohort size, and what counts as a band. Nothing exists yet;
-   `Assessment.status.moderated` is the only hook.
+3. ~~**Moderation packs**~~ — the internal pack is done; the external one
+   is not. Both decisions were the ML's and both are made: *n* = 1 for now
+   (and never more than 2 or 3), and a band is a letter grade, A1 down to
+   NG. See **Moderation packs**. The external pack is an assembly over the
+   internal ones and is now possible, because each internal pack keeps its
+   manifest.
 4. **Final marks for upload to SI** — whatever format the student
    information system wants, which nothing in the package knows about yet.
 5. **Module initialisation as a workflow** — a module leader specifying
@@ -874,6 +873,77 @@ assessment from the total, pointing N at a formula column, freezing the
 distribution on column I, skipping the clear, writing ids as numbers — and
 watching the test fail.
 
+### Moderation packs
+
+Who gets a second opinion, and the folders the second marker is handed.
+Three pieces in `grader_helper/moderation/`, in the order they run:
+
+| | |
+|---|---|
+| `flag_borderline` | who is within a point of the next grade up |
+| `sample_for_moderation` | the draw — *n* per band, plus requested, plus borderline if asked |
+| `build_moderation_pack` | the folders, and the manifest saying what is in them and why |
+
+The decisions were the module leader's and are recorded here so they are not
+re-litigated: **n = 1**, and never expected above 2 or 3; **a band is a letter
+grade**, A1 down to NG.
+
+#### Borderline, and why it may replace the ratio
+
+A total of 69 is a B2 and 70 is a B1 — one mark apart, and a different
+classification on a transcript. If a hand-marked component is wrong anywhere,
+it costs the student most there. The department is discussing moderating on
+that basis *instead of* a random sample per band, so borderline students are
+computed whatever else happens and `sample_for_moderation(borderline=...)`
+takes `"flag"` (the default, today's practice), `"include"` (take them all)
+or `"ignore"`.
+
+**The distance is measured from the rounded total**, because that is the mark
+of record: the sheet computes `ROUND(SUM(...),0)` and bands *that*, so a
+student whose exact total is 69.6 already has 70 and is already a B1.
+Measuring from the unrounded figure would flag people who are not near a
+boundary and miss people who are.
+
+The top band and NG never have a next grade, so neither is ever borderline.
+
+#### The seed is the point
+
+A random sample that comes out different every run is not a sample. Nobody
+can answer "why was this student moderated?" six months later, and re-running
+quietly changes the answer.
+
+So every draw carries the seed that produced it, `sample_for_moderation`
+generates one when not given it and **returns it**, and the seed goes into
+`moderation_sample.csv` beside the pack along with who was selected, from
+which band, on what mark, and why. Given the marks and the seed anyone can
+reproduce the selection exactly — there is a test that does.
+
+That manifest is also the handoff to the external pack, the same way
+`folder_rename_log.csv` is the handoff to `brightspace_name_folders`. The
+folders can be rebuilt from it; without it they cannot.
+
+#### Three bugs the prototype had, all now guarded
+
+The working version of this was a marimo notebook, and its faults were
+instructive rather than careless — every one is the kind that produces a
+plausible result:
+
+- **`if id in f.stem`** matched the student id anywhere in the folder name,
+  so `2330430` gets `23304301`'s work. The wrong student's submission in a
+  moderation pack is worse than none. Folder names are now *parsed*, with
+  `parse_brightspace_folder`.
+- **No seed, plus `dirs_exist_ok=True`, plus no record.** Run it twice and a
+  different student per band is copied in alongside the first, with nothing
+  saying which draw was real. A pack is now refused rather than merged into,
+  and `overwrite=True` replaces it outright.
+- **NG was sampled.** A non-participant has no submission folder, so the copy
+  found nothing and left an empty band directory — which reads as work the
+  moderator has already been through. NG is excluded, and a selected student
+  with nothing submitted is *named* in `pack.missing` and the manifest.
+
+Ten guards in `tests/test_moderation.py`, each checked by reintroducing the
+bug it catches.
+
 ### The Excel round trip
 
 `distribute_feedback_sheets`, `save_grader_sheets`,
@@ -1122,9 +1192,12 @@ Two things the walkthrough surfaced, neither a bug:
   `brightspace_name_folders` through `folder_rename_log.csv` rather than
   through a value. Worth knowing before looking for a return value that is
   not there.
-- **No moderation pack.** `Assessment.status.moderated` and
-  `Module.internal_moderator` exist, but nothing samples submissions or
-  stratifies them by letter grade. A feature to build, not a gap to cover.
+- **No external examiner pack.** The internal pack is built and keeps its
+  manifest, which is what an external pack has to be assembled over — but
+  nothing assembles one yet. `Assessment.status.moderated` is still not set
+  by anything either; `build_moderation_pack` writes the manifest but does
+  not mark the assessment moderated, because a pack having been *built* is
+  not the same as it having been *read*.
 - **The repo-root shim covers the public API but not submodules.** The repo
   directory is itself called `grader_helper`, so with its parent on
   `sys.path` an `import grader_helper` finds `./__init__.py`, which

@@ -50,6 +50,17 @@ from .dataframe_operations.prepare_data_for_departmental_template import (
 # collating -- the assembly layer, above the packages it reaches into
 from .collating import collate_module_marks
 
+# moderation
+from .moderation import (
+    Pack,
+    Sample,
+    build_moderation_pack,
+    flag_borderline,
+    next_grade_up,
+    read_moderation_manifest,
+    sample_for_moderation,
+)
+
 # file operations
 from .file_operations.distribute_feedback_sheets import distribute_feedback_sheets
 from .file_operations.distribute_feedback_sheets import distribute_feedback_sheets_groups
@@ -99,6 +110,13 @@ __all__ = [
     "check_for_weighted_columns",
     "prepare_data_for_departmental_template",
     "collate_module_marks",
+    "Pack",
+    "Sample",
+    "build_moderation_pack",
+    "flag_borderline",
+    "next_grade_up",
+    "read_moderation_manifest",
+    "sample_for_moderation",
     "brightspace_name_folders",
     "make_sub_date",
     "scan_multiple_subs",

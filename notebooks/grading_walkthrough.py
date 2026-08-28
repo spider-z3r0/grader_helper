@@ -25,6 +25,7 @@ with app.setup():
         distribute_feedback_sheets,
         extract_studentid_grade,
         build_departmental_sheet,
+        build_moderation_pack,
         collate_module_marks,
         collect_quiz_marks,
         import_brightspace_classlist,
@@ -32,6 +33,9 @@ with app.setup():
         prepare_data_for_departmental_template,
         read_quiz,
         save_distributed_graders,
+        flag_borderline,
+        read_moderation_manifest,
+        sample_for_moderation,
         save_grader_sheets,
         scan_multiple_subs,
         write_departmental_sheet,
@@ -1213,6 +1217,140 @@ def third_module_what_the_builder_did(sheet_3_path):
     | N | `{wide["C25"].value}` | `{wide["E25"].value}` | `{wide["F25"].value}` | `{wide["H25"].value}` | `{wide["J25"].value}` |
 
     And the distribution: `{wide["H6"].value}`
+    """)
+    return
+
+
+@app.cell
+def moderation_intro():
+    mo.md(
+        """
+        # Moderation
+
+        A second marker looks at a sample of the marking. Two things decide
+        who is in it, and the second is the one the department is currently
+        arguing about:
+
+        - **a random sample per grade band** — one student from each of A1
+          down to D1, so the moderator sees the range rather than whoever is
+          at the top of the list;
+        - **the borderline cases** — students within a point of the next
+          grade up. 69 and 70 are one mark apart and a degree classification
+          apart, so if a mark is wrong it costs the student more there than
+          anywhere else in the range.
+
+        Today the borderline students are *flagged* and the draw is random.
+        The department is discussing moderating on the borderline alone, so
+        `sample_for_moderation` takes `borderline="include"` and is ready for
+        that without a rewrite.
+
+        **The draw records its seed.** A random sample that comes out
+        different every run cannot answer "why was this student moderated?"
+        six months later, and re-running quietly changes the answer. The seed
+        goes into the manifest with everything else.
+        """
+    )
+    return
+
+
+@app.cell
+def moderation_who_is_near_a_boundary(module_3_sheet):
+    """MODULE LEADER -- who a single mark would have moved."""
+    near = flag_borderline(module_3_sheet)
+
+    near[
+        ["Name", "Student ID", "Total % Grade", "Letter Grade",
+         "Next Grade", "Points To Next", "Borderline"]
+    ].sort_values("Points To Next")
+    return (near,)
+
+
+@app.cell
+def moderation_draw_the_sample(module_3_sheet):
+    """MODULE LEADER -- one per band, plus the borderline cases."""
+    # No seed passed, so one is generated and handed back. Write it down --
+    # it is what makes this draw defensible later. `also=` takes anyone the
+    # leader wants a second opinion on regardless of band.
+    moderation = sample_for_moderation(
+        module_3_sheet, n=1, borderline="include"
+    )
+
+    mo.md(f"""
+    **{moderation}**
+
+    Bands that could not fill the quota: `{moderation.short_bands or "none"}`
+    """)
+    return (moderation,)
+
+
+@app.cell
+def moderation_who_was_chosen(moderation):
+    moderation.selected[
+        ["Name", "Student ID", "Total % Grade", "Letter Grade",
+         "Points To Next", "Selected Because"]
+    ]
+    return
+
+
+@app.cell
+def moderation_build_the_pack(MODULE_3, moderation):
+    """MODULE LEADER -- the folders the second marker is handed."""
+    pack = build_moderation_pack(
+        MODULE_3, moderation, MODULE_3.root / "Moderation", overwrite=True
+    )
+
+    mo.md(f"""
+    **{pack}** — `{pack.root}`
+
+    | | |
+    |---|---|
+    | copied, per assessment | `{pack.copied}` |
+    | selected but nothing submitted | `{pack.missing or "none"}` |
+    | manifest | `{pack.manifest.name}` |
+
+    Only the coursework has a download to copy from. The quizzes, the MCQ and
+    the exam have no submissions folder, so they are skipped — there is
+    nothing to moderate and nothing has gone wrong.
+
+    A student who was selected but submitted nothing is **named** rather than
+    left as an empty folder. An empty folder in a pack reads as work the
+    moderator has already been through.
+    """)
+    return (pack,)
+
+
+@app.cell
+def moderation_the_manifest(pack):
+    # The record of the draw, and the handoff to the external examiner's pack
+    # later. The folders can be rebuilt from this; without it they cannot.
+    read_moderation_manifest(pack.root)[
+        ["Module", "Student ID", "Letter Grade", "Selected Because",
+         "Seed", "N Per Band", "Missing Submissions"]
+    ]
+    return
+
+
+@app.cell
+def moderation_the_seed_reproduces_the_draw(module_3_sheet, moderation, pack):
+    # `repeated` is taken by the cw1 resubmission cell -- marimo needs every
+    # name in the notebook to be defined once.
+    recorded_seed = int(read_moderation_manifest(pack.root)["Seed"].iloc[0])
+    redrawn = sample_for_moderation(
+        module_3_sheet, n=1, borderline="include", seed=recorded_seed
+    )
+
+    reproduced = (
+        redrawn.selected["Student ID"].tolist()
+        == moderation.selected["Student ID"].tolist()
+    )
+
+    mo.md(f"""
+    Seed `{recorded_seed}` read back out of the manifest reproduces the draw
+    exactly: **{reproduced}**
+
+    That is the whole point of recording it. Anyone with the marks and the
+    seed can check that the sample was what it says it was, and re-running
+    reuses the draw rather than quietly making a new one.
     """)
     return
 
