@@ -12,7 +12,11 @@ with app.setup():
     from openpyxl import load_workbook
 
     sys.path.insert(0, "tests")          # so `fake_module` is importable
-    from fake_module import make_fake_module, make_second_module
+    from fake_module import (
+        make_fake_module,
+        make_second_module,
+        make_third_module,
+    )
 
     from grader_helper import (
         alphabetise_folders,
@@ -53,6 +57,9 @@ with app.setup():
     # The second module, which exists to show a shape the department's
     # template has no room for. Same scratch directory, beside PS4001.
     ROOT_2 = ROOT.parent / "PS4002"
+
+    # And a third, with four assessments collected three different ways.
+    ROOT_3 = ROOT.parent / "PS4003"
 
     # The department's own workbook, which lives in the repo. Located from
     # this file rather than the working directory, so the notebook works
@@ -1030,6 +1037,182 @@ def second_module_what_the_builder_did(sheet_2_path):
     neither 100 nor 10 divides 35 exactly. Where one does divide -- PS4001's
     `=E30/2` -- the shorter form is used, because it is the one that is exact
     in floating point.
+    """)
+    return
+
+
+@app.cell
+def third_module_intro():
+    mo.md(
+        """
+        # A full module: four assessments, three sources
+
+        **PS4003** is the shape a real module tends to have — a coursework,
+        weekly quizzes, an MCQ and an exam — and it is here for a different
+        reason from PS4002. PS4002 was about the *sheet*: a block the template
+        has no room for. This one is about the *collation*.
+
+        Its four assessments arrive by three different routes:
+
+        | | comes from | read by |
+        |---|---|---|
+        | Coursework 1 | feedback sheets in the download | `catch_grades` |
+        | Quizzes | Brightspace's own exports | `collect_quiz_marks` |
+        | MCQ | marked on paper | handed in via `marks=` |
+        | Exam | marked on paper | handed in via `marks=` |
+
+        PS4001 covers the first two, PS4002 the first and third. Nothing until
+        now has put all three in one module, and that is the thing worth
+        trying: `collate_module_marks` chooses a source **per assessment**, by
+        asking what each one *has* rather than what its `type` says. A module
+        with one source is not evidence that it does.
+
+        The quizzes here are **ten quizzes for ten marks with no free pass**,
+        so a student's mark is simply the number they passed. PS4001 sets
+        eleven for ten and forgives one. Both sets of rules live in their own
+        `module.toml`, which is the point — nothing in this notebook restates
+        them.
+        """
+    )
+    return
+
+
+@app.cell
+def init_the_third_module():
+    THIRD = make_third_module(ROOT_3)
+    MODULE_3 = ModuleFile.load(ROOT_3).module
+    quizzes_3 = MODULE_3.assessment("quizzes")
+
+    mo.md(f"""
+    **{MODULE_3.code} {MODULE_3.name}** ({MODULE_3.year})
+
+    - weights: `{ {a.name: a.weight for a in MODULE_3.assessments} }`
+    - grade sheet columns: `{MODULE_3.grade_sheet_columns}`
+
+    | | |
+    |---|---|
+    | quiz exports written | `{len(THIRD.quiz_exports["quizzes"])}` |
+    | pass mark | `{quizzes_3.pass_mark}` — strictly above |
+    | free passes | `{quizzes_3.free_passes}` |
+
+    Seven assessment columns. The quizzes need no weighted one — ten marks
+    worth ten — so a raw column sits in the middle of the block with weighted
+    columns either side of it, which is the case most likely to trip a
+    hand-edit.
+    """)
+    return MODULE_3, THIRD
+
+
+@app.cell
+def third_module_collate(MODULE_3, THIRD, cl):
+    """MODULE LEADER -- four assessments, three sources, one call."""
+    # Only the MCQ and the exam are handed in. The coursework is found by its
+    # grade_cell and read off the feedback sheets; the quizzes are found by
+    # the exports sitting in their submissions folder. Neither is mentioned
+    # here, and that is the point being demonstrated.
+    third_by_id = THIRD.expected.set_index("Student ID")
+
+    module_3_marks = collate_module_marks(
+        MODULE_3,
+        cl,
+        source="feedback",
+        marks={
+            "mcq": third_by_id["mcq"].to_dict(),
+            "exam": third_by_id["exam"].to_dict(),
+        },
+    )
+
+    module_3_marks
+    return (module_3_marks,)
+
+
+@app.cell
+def third_module_check_the_sources(MODULE_3, THIRD, module_3_marks):
+    # Worth confirming rather than assuming: the two columns nobody handed in
+    # are the two that had to be found on disk.
+    found = module_3_marks.set_index("Student ID")
+    expected_3 = THIRD.expected.set_index("Student ID")
+    coursework = MODULE_3.assessment("cw1").raw_column
+    quizzes = MODULE_3.assessment("quizzes").raw_column
+
+    mo.md(f"""
+    | column | source | agrees with the fixture |
+    |---|---|---|
+    | `{coursework}` | feedback sheets | `{
+        found[coursework].dropna().to_dict()
+        == expected_3["cw1"].dropna().to_dict()
+    }` |
+    | `{quizzes}` | Brightspace exports | `{
+        found[quizzes].to_dict() == expected_3["quizzes"].to_dict()
+    }` |
+
+    Neither was passed in. `collate_module_marks` found the coursework by its
+    `grade_cell` and the quizzes by the exports in their submissions folder,
+    in the same call that took the MCQ and exam as handed-in values.
+    """)
+    return
+
+
+@app.cell
+def third_module_prepare(MODULE_3, module_3_marks):
+    """MODULE LEADER -- totalled, banded, in the department's column order."""
+    module_3_sheet = prepare_data_for_departmental_template(
+        module_3_marks, MODULE_3
+    )
+
+    module_3_sheet
+    return (module_3_sheet,)
+
+
+@app.cell
+def third_module_build_the_sheet(MODULE_3, module_3_marks):
+    """MODULE LEADER -- seven assessment columns, laid out and filled."""
+    sheet_3_path = build_departmental_sheet(
+        MODULE_3, TEMPLATE, MODULE_3.root / f"{MODULE_3.code} grades.xlsx",
+        overwrite=True,
+    )
+    write_departmental_sheet(module_3_marks, MODULE_3, sheet_3_path)
+
+    mo.md(f"Written to `{sheet_3_path}`")
+    return (sheet_3_path,)
+
+
+@app.cell
+def third_module_what_the_builder_did(sheet_3_path):
+    wide = load_workbook(sheet_3_path)["GradeTemplate"]
+
+    mo.md(f"""
+    ### Seven assessment columns
+
+    Row 29: `{[wide.cell(29, i).value for i in range(1, 13)]}`
+
+    | | | |
+    |---|---|---|
+    | weighting | `{wide["D30"].value}` | coursework, 100 marks worth 30 |
+    | *(none)* | — | quizzes, 10 marks worth 10: nothing to weight |
+    | weighting | `{wide["G30"].value}` | MCQ, 100 worth 20 — **divides exactly** |
+    | weighting | `{wide["I30"].value}` | exam, 100 worth 40 |
+    | **total** | `{wide["J30"].value}` | four components, and `E30` is a raw column |
+    | **letter** | `{wide["K30"].value[:38]}...` | reads `J30` |
+
+    `=F30/5` is the exact-divisor form: 100 goes into 20 five times, so a
+    single division does it and a single division is exact. The coursework and
+    exam get `/100*30` and `/100*40` because 100 does not divide 30 or 40.
+
+    The total is the one to look at. `E30` — the quizzes — is a **raw** column
+    and reaches the total directly, sitting between two weighted ones. Summing
+    the weighted columns and forgetting it, or summing every other column and
+    double-counting the raw marks, are both easy hand-edits and both give a
+    plausible number.
+
+    Descriptives, one per column, none missed:
+
+    | | C | E | F | H | J |
+    |---|---|---|---|---|---|
+    | Mean | `{wide["C23"].value}` | `{wide["E23"].value}` | `{wide["F23"].value}` | `{wide["H23"].value}` | `{wide["J23"].value}` |
+    | N | `{wide["C25"].value}` | `{wide["E25"].value}` | `{wide["F25"].value}` | `{wide["H25"].value}` | `{wide["J25"].value}` |
+
+    And the distribution: `{wide["H6"].value}`
     """)
     return
 

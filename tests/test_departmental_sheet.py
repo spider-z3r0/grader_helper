@@ -725,3 +725,73 @@ def test_the_committed_template_grades_a_perfect_score_as_a1(template):
     from grader_helper import make_letter_grade
 
     assert make_letter_grade(100) == "A1", "our code must agree with the sheet"
+
+
+# --------------------------------------------------------------------------
+# A raw column in the middle of the block.
+
+
+@pytest.fixture
+def mixed_module() -> Module:
+    """PS4003's shape: an unweighted assessment between two weighted ones.
+
+    Ten quiz marks worth ten need no weighted column, so the raw column has to
+    reach the total itself while its neighbours reach it through theirs. That
+    is the arrangement most likely to be got wrong by hand -- summing only the
+    weighted columns drops it, summing every column double-counts the marks
+    that were weighted.
+    """
+    return _module(
+        _coursework("cw1", "Coursework 1", 100, 30),
+        Assessment(id="quizzes", type="quiz", name="Quizzes",
+                   marks_out_of=10, weight=10, pass_mark=80.0),
+        Assessment(id="mcq", type="mcq", name="MCQ", marks_out_of=100, weight=20),
+        Assessment(id="exam", type="exam", name="Exam", marks_out_of=100, weight=40),
+    )
+
+
+def test_an_unweighted_column_reaches_the_total_directly(
+    template, mixed_module, tmp_path
+):
+    built = build_departmental_sheet(mixed_module, template, tmp_path / "mixed.xlsx")
+    worksheet = load_workbook(built)["GradeTemplate"]
+
+    assert _header_row(worksheet)[2:9] == [
+        "Coursework 1 (100)", "Coursework 1 (30)",
+        "Quizzes (10)",
+        "MCQ (100)", "MCQ (20)",
+        "Exam (100)", "Exam (40)",
+    ]
+    # D, G, I are weighted; E is the quizzes' raw column, reaching the total
+    # on its own because ten marks worth ten need no weighting.
+    assert _value(worksheet["J30"]) == "=ROUND(SUM(D30,E30,G30,I30),0)"
+    assert _value(worksheet["F30"]) is None, "a raw column holds no formula"
+
+
+def test_the_exact_divisor_form_is_used_where_it_applies(mixed_module):
+    """100 marks worth 20 divides exactly, so it gets `=F30/5`.
+
+    The coursework and exam do not -- 100 divides neither 30 nor 40 -- so they
+    take the long form. One module, both shapes.
+    """
+    layout = DepartmentalLayout.for_module(mixed_module)
+    cw1, _quizzes, mcq, exam = layout.module.assessments
+
+    assert layout.weighting_formula(mcq, 30) == "=F30/5"
+    assert layout.weighting_formula(cw1, 30) == "=C30/100*30"
+    assert layout.weighting_formula(exam, 30) == "=H30/100*40"
+
+
+def test_n_counts_the_right_source_around_an_unweighted_column(
+    template, mixed_module, tmp_path
+):
+    """The 'nearest raw column at or before' rule, with a raw one mid-block."""
+    built = build_departmental_sheet(mixed_module, template, tmp_path / "mixed.xlsx")
+    worksheet = load_workbook(built)["GradeTemplate"]
+
+    assert _value(worksheet.cell(N_ROW, 3)) == "=COUNT(C30:C530)"
+    assert _value(worksheet.cell(N_ROW, 4)) == "=COUNT(C30:C530)"
+    assert _value(worksheet.cell(N_ROW, 5)) == "=COUNT(E30:E530)", "quizzes count themselves"
+    assert _value(worksheet.cell(N_ROW, 6)) == "=COUNT(F30:F530)"
+    assert _value(worksheet.cell(N_ROW, 7)) == "=COUNT(F30:F530)"
+    assert _value(worksheet.cell(N_ROW, 10)) == "=COUNT(H30:H530)", "total counts the last raw"

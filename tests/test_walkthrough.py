@@ -226,3 +226,65 @@ def test_the_second_module_totals_what_the_fixture_expects(walkthrough):
 
     # Joyce sat nothing and scored nothing, in this module as in the other.
     assert sheet.loc["23304309", "Letter Grade"] == "NG"
+
+
+def test_the_third_module_collates_from_three_sources(walkthrough):
+    """PS4003's four assessments arrive three different ways, in one call.
+
+    The coursework is read off its feedback sheets, the quizzes out of
+    Brightspace's exports, and the MCQ and exam are handed in. Only the last
+    two are passed to `collate_module_marks`; the other two it has to find.
+    `collate_module_marks` chooses per assessment, by asking what each one
+    *has*, and a module with a single source is no evidence that it does.
+    """
+    third = walkthrough["THIRD"]
+    module = walkthrough["MODULE_3"]
+    marks = walkthrough["module_3_marks"].set_index("Student ID")
+    expected = third.expected.set_index("Student ID")
+
+    assert [a.id for a in module.assessments] == ["cw1", "quizzes", "mcq", "exam"]
+    assert len(third.quiz_exports["quizzes"]) == 10, "ten quizzes for ten marks"
+
+    # Ten quizzes and no free pass, so the mark is the number passed. PS4001
+    # sets eleven and forgives one; both are read off module.toml.
+    quizzes = module.assessment("quizzes")
+    assert (quizzes.marks_out_of, quizzes.free_passes) == (10, 0)
+    assert quizzes.weighted_column is None, "ten marks worth ten need no weighting"
+
+    # Neither of these was handed in.
+    assert marks["Coursework 1 (100)"].dropna().to_dict() == (
+        expected["cw1"].dropna().to_dict()
+    )
+    assert marks["Quizzes (10)"].to_dict() == expected["quizzes"].to_dict()
+
+    sheet = walkthrough["module_3_sheet"].set_index("Student ID")
+    assert sheet["Total % Grade"].to_dict() == expected["Total % Grade"].to_dict()
+    assert sheet["Letter Grade"].to_dict() == expected["Letter Grade"].to_dict()
+    assert sheet.loc["23304309", "Letter Grade"] == "NG"
+
+
+def test_the_third_module_sheet_carries_every_component(walkthrough):
+    """Seven assessment columns, and the raw one still reaches the total."""
+    from openpyxl import load_workbook
+
+    worksheet = load_workbook(walkthrough["sheet_3_path"])["GradeTemplate"]
+    headers = [
+        worksheet.cell(29, column).value
+        for column in range(1, worksheet.max_column + 1)
+        if worksheet.cell(29, column).value
+    ]
+
+    assert headers == [
+        "Name", "Student ID",
+        "Coursework 1 (100)", "Coursework 1 (30)",
+        "Quizzes (10)",
+        "MCQ (100)", "MCQ (20)",
+        "Exam (100)", "Exam (40)",
+        "Total % Grade", "Letter Grade", "Comments",
+    ]
+    # E30 is the quizzes' raw column and reaches the total directly, between
+    # two weighted ones.
+    assert worksheet["J30"].value == "=ROUND(SUM(D30,E30,G30,I30),0)"
+    assert worksheet["G30"].value == "=F30/5", "100 worth 20 divides exactly"
+    assert worksheet["K30"].value.startswith("=IF(ROUND(J30,2)>0,")
+    assert worksheet["H6"].value == '=COUNTIF(K30:K530,"A1")'

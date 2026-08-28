@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 412 tests on Linux and 413 with a real Excel:
+Done, 418 tests on Linux and 419 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -432,6 +432,44 @@ Keep an assessment there that is not marked out of 100. Every other one in
 the project is out of 100 or on its own weight, so nothing had ever scaled
 *up* — and the scale-up is what found the collation bug above on its first
 run.
+
+#### PS4003, and the three sources
+
+**PS4003** — coursework, weekly quizzes, an MCQ and an exam — is the third
+module in the walkthrough, and it is there for a different reason from
+PS4002. PS4002 is about the *sheet*: a block the template has no room for.
+PS4003 is about the *collation*.
+
+Its four assessments arrive by three routes in a single call:
+
+| | comes from | read by |
+|---|---|---|
+| Coursework 1 | feedback sheets in the download | `catch_grades` |
+| Quizzes | Brightspace's own exports | `collect_quiz_marks` |
+| MCQ, Exam | marked on paper | handed in via `marks=` |
+
+PS4001 covers the first two and PS4002 the first and third. Nothing had put
+all three in one module, so nothing showed that `collate_module_marks`
+chooses **per assessment** — by asking what each one *has* — rather than per
+module. `test_one_collation_reads_three_different_sources` is the guard, and
+it names which route broke rather than failing somewhere downstream.
+
+Two shapes it adds to the sheet, both of which the earlier modules lack:
+
+- **A raw column in the middle of the block.** Ten quiz marks worth ten need
+  no weighted column, so `E30` reaches the total directly while `D30`, `G30`
+  and `I30` reach it through theirs: `=ROUND(SUM(D30,E30,G30,I30),0)`. Summing
+  only the weighted columns drops it; summing every column double-counts the
+  marks that were weighted. Both are easy hand-edits and both give a
+  plausible number.
+- **The exact-divisor weighting in the wild.** The MCQ is 100 marks worth 20,
+  and 100/20 is 5, so it gets `=F30/5` while the coursework and exam get
+  `/100*30` and `/100*40`. One module, both forms.
+
+Its quizzes are **ten for ten marks with no free pass**, so a mark is simply
+the number passed. PS4001 sets eleven for ten and forgives one. Keeping both
+is deliberate: the rules are read off the assessment in `module.toml`, and a
+fixture that only ever showed one set of them would not prove that.
 
 #### A note on the walkthrough notebook
 
