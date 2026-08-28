@@ -592,6 +592,73 @@ record gives the same frame. Writing it turned up the honest version of the
 same point — the first draft of the fixture wrote a mark for the student who
 never submitted, the two records disagreed, and the test was right to fail.
 
+### The departmental workbook
+
+`Dept grade sheet Template 2026.xlsx`, committed to the repo root. Five
+sheets: `Guidelines for staff`, `Moderation Form`, `EHS grades UG modules`,
+`Checklist for EE`, `GradeTemplate`. The last is the one marks go into; the
+middle two matter for moderation, which is items 2 and 3 of **Next** and is
+not started.
+
+Read off the file itself, not inferred:
+
+| | |
+|---|---|
+| header row | 29 |
+| columns | A `Name`, B `Student ID`, C..G the assessments, H `Total % Grade`, I `Letter Grade`, J `Comments` |
+| student rows | 30 to 530, so 501 of them |
+| sample data | rows 30–50, and it has to be cleared before real marks go in |
+| band table | rows 7–17: A lower, B upper, C letter, D award, E QPV. Row 7 is `No participation` → NG |
+| distribution | G5:I17, `COUNTIF(I30:I530, "A1")` and so on, with the average QPV at I17 |
+| summary | rows 23–25: Mean, SD, N |
+
+`tests/resources/gradetemplate_samples.csv` is rows 30–49 of this sheet,
+which is where the golden test's numbers came from.
+
+#### Four columns are the sheet's, not ours
+
+**D, F, H and I hold formulas, in all 501 rows, already.**
+
+```
+D30  =C30/100*40                    the weighted coursework 1
+F30  =E30/2                         the weighted coursework 2
+H30  =ROUND(SUM(D30,F30,G30),0)     the total
+I30  =IF(ROUND(H30,2)>0, ...)       the letter grade, off the band table
+```
+
+So writing a module into this sheet means writing **A, B and the raw mark
+columns** — five values a row — and touching nothing else. Filling in the
+weighted columns or the total would overwrite the department's own
+arithmetic with ours, which is backwards: the sheet is the source of truth
+and our copy of the calculation exists to be *checked against* it.
+
+That also settles what a test can assert. openpyxl does not evaluate
+formulas, so on Linux the check is that the values landed, the formulas are
+untouched and the sample rows are gone. Comparing H and I against
+`prepare_data_for_departmental_template` needs a real Excel, which is what
+the `excel` marker is for.
+
+Two things the sheet confirms, both already implemented from the sample CSV:
+`H` rounds half away from zero at 0 dp, which is `excel_round`; and `I`
+returns `NG` when the total is not greater than zero, which is
+`NO_PARTICIPATION`.
+
+#### The template is one module's shape
+
+The formulas hardcode it: `C/100*40`, `E/2`, and a total that sums exactly
+`D, F, G`. This template **is** cw1 (100/40) + cw2 (100/50) + MCQ (10/10).
+A module with four assessments, or different weights, cannot be written into
+it as it stands — the fourth would be silently left out of the total, which
+is the "plausible number" failure this package exists to prevent.
+
+The way out is already in the codebase and needs no new convention: the
+template's headers **are** `Assessment.raw_column`. Row 29 literally reads
+`Coursework 1 (100)`, `MCQ (10)`. So the writer finds each assessment's
+column by matching `raw_column` against row 29, writes the raw marks there,
+and refuses — naming the column — when the module has an assessment the
+template has no home for. A module that fits is written; one that does not
+is told so, rather than being half-written.
+
 ### The Excel round trip
 
 `distribute_feedback_sheets`, `save_grader_sheets`,
