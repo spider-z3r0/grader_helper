@@ -405,10 +405,10 @@ def test_weighting_survives_an_assessment_not_marked_out_of_100(tmp_path):
     for column in module.grade_sheet_columns:
         assert column in marks.columns, f"{column} is missing from the collation"
 
-    # And they hold the right arithmetic: 10 marks worth 35 scales by 3.5.
-    mcq1 = module.assessment("mcq1")
-    assert mcq1.weight_fraction() == 3.5
-    assert (
-        marks["MCQ 1 (35)"].tolist()
-        == (marks["MCQ 1 (10)"] * 3.5).tolist()
-    )
+    # And they hold the right arithmetic, in both directions. MCQ 1 is out of
+    # 100 and scales down; MCQ 2 is out of 10 worth 35 and scales *up*, which
+    # is the case that had no weighted column at all.
+    assert module.assessment("mcq1").weight_fraction() == 0.35
+    assert module.assessment("mcq2").weight_fraction() == 3.5
+    assert marks["MCQ 1 (35)"].tolist() == (marks["MCQ 1 (100)"] * 0.35).tolist()
+    assert marks["MCQ 2 (35)"].tolist() == (marks["MCQ 2 (10)"] * 3.5).tolist()

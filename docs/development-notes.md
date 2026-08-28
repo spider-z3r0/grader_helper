@@ -422,10 +422,16 @@ MCQs are "sat on paper" and handed in through `collate_module_marks(marks=)`,
 which is what that argument is for. Same cohort, same class list — the same
 students taking a second module.
 
-Its MCQs are marked out of 10 and worth 35, which is a scale-up rather than
-the usual scale-down, and that is the point: it is the first assessment in
-the project not marked out of 100 or on its own weight, and it found the
-collation bug above on its first run.
+Its **two MCQs are on different scales on purpose**. An MCQ is sometimes
+graded out of 100 and then weighted, and sometimes graded out of however many
+questions it had; both happen, so the fixture carries one of each rather than
+the same case twice. MCQ 1 is out of 100 worth 35, MCQ 2 is out of 10 worth
+35, and the sheet holds `=E30/100*35` beside `=G30/10*35`.
+
+Keep an assessment there that is not marked out of 100. Every other one in
+the project is out of 100 or on its own weight, so nothing had ever scaled
+*up* — and the scale-up is what found the collation bug above on its first
+run.
 
 #### A note on the walkthrough notebook
 

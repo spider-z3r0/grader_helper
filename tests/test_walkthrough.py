@@ -171,14 +171,21 @@ def test_the_walkthrough_writes_both_departmental_sheets(walkthrough):
     assert first["A30"].value != "Sample1"
     assert first["C30"].value is not None
 
-    # PS4002 does not fit. Six assessment columns where the template has five.
+    # PS4002 does not fit. Six assessment columns where the template has five,
+    # and the two MCQs are on different scales -- out of 100 and out of 10 --
+    # because both happen in practice.
     assert headers(second) == [
         "Name", "Student ID",
         "Coursework 1 (100)", "Coursework 1 (30)",
-        "MCQ 1 (10)", "MCQ 1 (35)",
+        "MCQ 1 (100)", "MCQ 1 (35)",
         "MCQ 2 (10)", "MCQ 2 (35)",
         "Total % Grade", "Letter Grade", "Comments",
     ]
+
+    # One weighting scales down, the other scales up, and neither simplifies
+    # to a single divisor.
+    assert second["F30"].value == "=E30/100*35"
+    assert second["H30"].value == "=G30/10*35"
 
     # Every assessment reaches the total -- the failure the builder exists to
     # prevent is one of them quietly missing from it.
@@ -213,8 +220,9 @@ def test_the_second_module_totals_what_the_fixture_expects(walkthrough):
     assert sheet["Total % Grade"].to_dict() == expected["Total % Grade"].to_dict()
     assert sheet["Letter Grade"].to_dict() == expected["Letter Grade"].to_dict()
 
-    # The weighted columns exist and hold the scale-up.
-    assert sheet["MCQ 1 (35)"].to_dict() == (sheet["MCQ 1 (10)"] * 3.5).to_dict()
+    # Both weighted columns exist: one scaling down, one scaling up.
+    assert sheet["MCQ 1 (35)"].to_dict() == (sheet["MCQ 1 (100)"] * 0.35).to_dict()
+    assert sheet["MCQ 2 (35)"].to_dict() == (sheet["MCQ 2 (10)"] * 3.5).to_dict()
 
     # Joyce sat nothing and scored nothing, in this module as in the other.
     assert sheet.loc["23304309", "Letter Grade"] == "NG"

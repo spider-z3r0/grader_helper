@@ -936,9 +936,13 @@ def init_the_second_module():
     - grade sheet columns: `{MODULE_2.grade_sheet_columns}`
 
     {len(MODULE_2.grade_sheet_columns)} columns of assessment where the
-    template has five. Both MCQs need a weighted column: marked out of 10 and
-    worth 35, they are not already on their own contribution the way PS4001's
-    MCQ was.
+    template has five.
+
+    The two MCQs are marked on **different scales**, which is the real
+    situation rather than a contrivance: an MCQ is sometimes graded out of 100
+    and then weighted, and sometimes graded out of however many questions it
+    had. MCQ 1 is out of 100 worth 35; MCQ 2 is out of 10 worth 35. Both need
+    a weighted column, and the sheet will end up holding one of each form.
     """)
     return MODULE_2, SECOND
 
@@ -1003,8 +1007,8 @@ def second_module_what_the_builder_did(sheet_2_path):
     | | | |
     |---|---|---|
     | weighting | `{built["D30"].value}` | coursework, 100 marks worth 30 |
-    | weighting | `{built["F30"].value}` | MCQ 1, 10 marks worth 35 |
-    | weighting | `{built["H30"].value}` | MCQ 2, same again |
+    | weighting | `{built["F30"].value}` | MCQ 1, graded out of 100 then weighted |
+    | weighting | `{built["H30"].value}` | MCQ 2, graded out of 10 -- a scale *up* |
     | **total** | `{built["I30"].value}` | three components, not the template's `D, F, G` |
     | **letter** | `{built["J30"].value[:38]}...` | reads `I30`, not the template's `H30` |
 
@@ -1020,10 +1024,12 @@ def second_module_what_the_builder_did(sheet_2_path):
 
     Two details worth reading twice. The **N row counts the raw column**, not
     its own -- `D25` counts `C`, because the weighting formula sits in all 501
-    rows and counting it would return 501 whatever the cohort. And the
-    weightings are `/10*35` rather than a single divisor, because 10 does not
-    divide 35 exactly; where it does divide, as in PS4001's `=E30/2`, the
-    shorter form is used because it is the one that is exact.
+    rows and counting it would return 501 whatever the cohort.
+
+    And none of these weightings simplifies to a single divisor, because
+    neither 100 nor 10 divides 35 exactly. Where one does divide -- PS4001's
+    `=E30/2` -- the shorter form is used, because it is the one that is exact
+    in floating point.
     """)
     return
 

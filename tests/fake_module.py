@@ -112,33 +112,40 @@ COHORT = (
 #: simply a permutation the department's file was not drawn for, which until
 #: `build_departmental_sheet` existed meant reshaping the block by hand.
 #:
-#: The MCQs are marked out of 10 and worth 35, the same `marks_out_of` the
-#: PS4001 MCQ uses. That is deliberately not a round ratio: 10 does not divide
-#: 35, so these exercise the `/marks_out_of*weight` branch of the weighting
-#: while the coursework (100 out of, 30 worth) does too, and neither gets the
-#: exact-divisor form. See `weighting_formula`.
+#: **The two MCQs are marked on different scales on purpose.** An MCQ here is
+#: sometimes graded out of 100 and then weighted, and sometimes graded out of
+#: however many questions it had; both happen, so the fixture carries one of
+#: each rather than the same case twice. MCQ 1 is out of 100 worth 35, MCQ 2
+#: is out of 10 worth 35, and the sheet ends up holding `=E30/100*35` beside
+#: `=G30/10*35`.
+#:
+#: The second of those is the one that matters. Every other assessment in this
+#: project is marked out of 100 or on its own weight, so nothing had ever
+#: scaled *up* -- and a scale-up is what found the collation bug where the
+#: weighted column's name was inferred from the fraction rather than taken
+#: from the assessment. Keep an assessment here that is not out of 100.
 SECOND_CODE = "PS4002"
 SECOND_ASSESSMENTS = (
     dict(id="cw1", type="coursework", name="Coursework 1",
          marks_out_of=100, weight=30),
-    dict(id="mcq1", type="mcq", name="MCQ 1", marks_out_of=10, weight=35),
+    dict(id="mcq1", type="mcq", name="MCQ 1", marks_out_of=100, weight=35),
     dict(id="mcq2", type="mcq", name="MCQ 2", marks_out_of=10, weight=35),
 )
 
 
 def second_module_marks() -> dict[str, dict[str, int]]:
-    """PS4002's marks, derived from the same cohort rather than invented.
+    """PS4002's marks, taken from the same cohort rather than invented.
 
-    The coursework takes COHORT's cw1 column and MCQ 1 takes its mcq column.
-    MCQ 2 is cw2 scaled to ten, which keeps the two MCQ columns visibly
-    different -- two identical columns in a fixture read as a copy-paste slip
-    -- while preserving the edge cases that make the cohort worth having:
-    Joyce still scores zero on everything, so he is still NG rather than F.
+    Each assessment borrows the COHORT column that is already on its scale:
+    the coursework and MCQ 1 are out of 100 and take cw1 and cw2, MCQ 2 is out
+    of 10 and takes the mcq column. That keeps the edge cases that make the
+    cohort worth having -- Joyce still scores zero on everything, so he is
+    still NG rather than F.
     """
     return {
         "cw1": {sid: cw1 for sid, _, _, cw1, _, _ in COHORT},
-        "mcq1": {sid: mcq for sid, _, _, _, _, mcq in COHORT},
-        "mcq2": {sid: round(cw2 / 10) for sid, _, _, _, cw2, _ in COHORT},
+        "mcq1": {sid: cw2 for sid, _, _, _, cw2, _ in COHORT},
+        "mcq2": {sid: mcq for sid, _, _, _, _, mcq in COHORT},
     }
 
 
@@ -610,7 +617,7 @@ def _second_expected_frame(marks: dict) -> pd.DataFrame:
         coursework = marks["cw1"][sid] if submitted else None
         total = excel_round(
             (coursework * (30 / 100) if submitted else 0)
-            + marks["mcq1"][sid] * (35 / 10)
+            + marks["mcq1"][sid] * (35 / 100)
             + marks["mcq2"][sid] * (35 / 10)
         )
         rows.append(
