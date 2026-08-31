@@ -133,6 +133,16 @@ def build_moderation_pack(
 
     copied: dict[str, int] = {}
     missing: list[tuple[str, str]] = []
+    #: Students something was actually copied for, so the ones with nothing
+    #: can be told apart from the ones simply not selected.
+    served: set[str] = set()
+
+    # Every sampled band gets a folder, whether or not anything lands in it.
+    # A band that quietly does not appear reads as a band that was never
+    # sampled, which is exactly as misleading as an empty one reading as work
+    # already moderated -- see _note_nothing_submitted.
+    for grade in set(wanted.values()):
+        (destination / grade).mkdir(parents=True, exist_ok=True)
 
     for assessment in module.assessments:
         submissions = assessment.submissions_path
@@ -154,9 +164,36 @@ def build_moderation_pack(
             target = destination / grade / assessment.name / folder.name
             shutil.copytree(folder, target, dirs_exist_ok=True)
             copied[assessment.id] += 1
+            served.add(student_id)
+
+    for student_id, grade in wanted.items():
+        if student_id not in served:
+            _note_nothing_submitted(destination / grade, student_id)
 
     manifest = _write_manifest(destination, module, sample, missing)
     return Pack(root=destination, manifest=manifest, copied=copied, missing=missing)
+
+
+def _note_nothing_submitted(band: pl.Path, student_id: str) -> None:
+    """Say so in the pack, not only in the manifest.
+
+    A student can be sampled into a band and have submitted nothing for any
+    assessment -- somebody who sat the quizzes and handed in no coursework
+    still has a mark and still falls in a band. Left alone that produces
+    either an empty band folder, which reads as work the moderator has been
+    through, or no band folder at all, which reads as a band that was never
+    sampled. Both are wrong in the same way, so the pack says which it is.
+    """
+    band.mkdir(parents=True, exist_ok=True)
+    (band / f"NOTHING SUBMITTED - {student_id}.txt").write_text(
+        f"Student {student_id} was selected for moderation in this band and "
+        "submitted nothing for any assessment.\n\n"
+        "There is no work to moderate. This file is here so the empty folder "
+        "is not read as work that has already been looked at, and so the band "
+        "is not read as one that was never sampled. See "
+        f"{MANIFEST_NAME} for the full record of the draw.\n",
+        encoding="utf-8",
+    )
 
 
 def _submissions_by_student(submissions: pl.Path) -> dict[str, pl.Path]:

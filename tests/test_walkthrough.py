@@ -330,3 +330,55 @@ def test_the_walkthrough_moderates_the_third_module(walkthrough):
     assert again.selected["Student ID"].tolist() == (
         moderation.selected["Student ID"].tolist()
     )
+
+
+def test_a_moderation_pack_spans_every_marked_assessment(walkthrough):
+    """PS4001 has two marked courseworks, and both reach the moderator.
+
+    PS4003 has only one assessment with a download, so it cannot show this --
+    and a pack that quietly held one assessment's work when the module has two
+    would look complete. The junk a real download carries must not reach the
+    moderator either.
+    """
+    pack = walkthrough["ps4001_pack"]
+    sample = walkthrough["ps4001_sample"]
+
+    assert set(pack.copied) == {"cw1", "cw2"}, (
+        "both marked courseworks must be copied; the quizzes have no "
+        "submission folders and are rightly absent"
+    )
+    assert pack.copied["cw1"] == pack.copied["cw2"]
+
+    # Each band folder holds a sub-folder per assessment, named for it.
+    for _, student in sample.selected.iterrows():
+        band = pack.root / str(student["Letter Grade"])
+        assert band.is_dir()
+    assessments = {
+        path.name
+        for path in pack.root.rglob("*")
+        if path.is_dir() and path.parent.parent == pack.root
+    }
+    assert assessments == {"Coursework 1", "Coursework 2"}
+
+    # A band whose sampled student submitted nothing still appears, with a
+    # note saying so rather than as an empty folder or no folder at all.
+    for student, band in zip(
+        sample.selected["Student ID"], sample.selected["Letter Grade"]
+    ):
+        assert (pack.root / str(band)).is_dir(), f"band {band} missing from the pack"
+    unserved = {student for student, _ in pack.missing}
+    for student in unserved:
+        assert list(pack.root.rglob(f"NOTHING SUBMITTED - {student}.txt")), (
+            f"{student} was sampled, submitted nothing, and the pack does not say so"
+        )
+
+    # The fixture's download carries a __MACOSX folder and an index.html,
+    # which is what a real one looks like. Neither parses as a submission.
+    copied_folders = [
+        path.name
+        for path in pack.root.rglob("*")
+        if path.is_dir() and path.parent.name.startswith("Coursework")
+    ]
+    assert copied_folders, "nothing was copied at all"
+    assert not any("MACOSX" in name for name in copied_folders)
+    assert all(" - " in name for name in copied_folders)

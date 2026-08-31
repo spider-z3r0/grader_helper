@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 451 tests on Linux and 452 with a real Excel:
+Done, 455 tests on Linux and 456 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -941,8 +941,25 @@ plausible result:
   moderator has already been through. NG is excluded, and a selected student
   with nothing submitted is *named* in `pack.missing` and the manifest.
 
-Ten guards in `tests/test_moderation.py`, each checked by reintroducing the
-bug it catches.
+A fourth, found by asking why the walkthrough built no pack for PS4001: a
+sampled band whose student submitted nothing **never appeared in the pack at
+all**, because the band folder was only ever created as a side effect of
+copying work into it. That is the empty-folder problem inverted — an empty
+folder reads as work already moderated, and a *missing* folder reads as a band
+nobody sampled. Every sampled band now gets a folder, and one with nothing in
+it carries a note saying which of the two it is.
+
+Fourteen guards in `tests/test_moderation.py`, each checked by reintroducing
+the bug it catches. One of them was a bad test first: `every sampled band gets
+a folder` kept the whole cohort, so another student in the same band had work
+and `copytree` made the folder anyway — it passed against a build with the fix
+removed. Narrowing the frame to the one student is what turned it into a test.
+
+**PS4001 is the only fixture where a pack spans two assessments**, because it
+is the only module with two marked courseworks. PS4003 has one, so its test
+asserts `copied == {"cw1"}` and cannot catch a pack that quietly holds one
+assessment's work when the module has two. The walkthrough moderates PS4001 as
+well for exactly that reason.
 
 ### The Excel round trip
 

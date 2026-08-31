@@ -373,3 +373,70 @@ def test_a_pack_without_a_manifest_refuses_to_be_read(tmp_path):
     (tmp_path / "empty").mkdir()
     with pytest.raises(FileNotFoundError, match="cannot say"):
         read_moderation_manifest(tmp_path / "empty")
+
+
+def test_a_sampled_band_with_nothing_to_show_says_so(module_and_sheet, tmp_path):
+    """The band folder appears, and explains itself.
+
+    A student can be sampled and have submitted nothing for any assessment --
+    somebody who sat the quizzes and handed in no coursework still has a mark
+    and still falls in a band. Without this the band folder either does not
+    exist, reading as a band nobody sampled, or exists empty, reading as work
+    the moderator has already been through.
+    """
+    module, sheet = module_and_sheet
+    # 23304311 is the fixture's non-submitter.
+    drawn = sample_for_moderation(sheet, n=1, seed=42, also=["23304311"])
+    pack = build_moderation_pack(module, drawn, tmp_path / "Moderation")
+
+    band = str(
+        drawn.selected.set_index("Student ID").loc["23304311", "Letter Grade"]
+    )
+    note = pack.root / band / "NOTHING SUBMITTED - 23304311.txt"
+
+    assert (pack.root / band).is_dir(), "the sampled band must appear in the pack"
+    assert note.is_file(), "an empty band must say why it is empty"
+    assert "23304311" in note.read_text()
+    assert MANIFEST_NAME in note.read_text(), "the note points at the full record"
+
+
+def test_a_band_whose_only_student_submitted_nothing_still_appears(
+    module_and_sheet, tmp_path
+):
+    """The band must not vanish, and nothing else may create it by accident.
+
+    The first version of this test kept the whole cohort, so another student
+    in the same band had work and `copytree` made the folder regardless -- it
+    passed against a build with the fix removed. Narrowing the frame to the
+    one student is what makes it a test: with nothing copied anywhere, the
+    band folder exists only if the pack deliberately creates it.
+    """
+    module, sheet = module_and_sheet
+    solo = sheet[sheet["Student ID"] == "23304311"]  # the fixture's non-submitter
+    assert len(solo) == 1
+
+    drawn = sample_for_moderation(solo, n=1, seed=1)
+    pack = build_moderation_pack(module, drawn, tmp_path / "Moderation")
+    band = str(drawn.selected["Letter Grade"].iloc[0])
+
+    assert (pack.root / band).is_dir(), (
+        "a sampled band with no work at all must still appear, or it reads as "
+        "a band nobody sampled"
+    )
+    assert (pack.root / band / "NOTHING SUBMITTED - 23304311.txt").is_file()
+    assert sum(pack.copied.values()) == 0
+
+
+def test_a_student_with_some_work_gets_no_such_note(module_and_sheet, tmp_path):
+    """The note is for nothing at all, not for a gap in one assessment."""
+    module, sheet = module_and_sheet
+    drawn = sample_for_moderation(sheet, n=1, seed=42)
+    pack = build_moderation_pack(module, drawn, tmp_path / "Moderation")
+
+    notes = list(pack.root.rglob("NOTHING SUBMITTED*"))
+    served = set(drawn.selected["Student ID"]) - {
+        student for student, _ in pack.missing
+    }
+    assert served, "this draw served nobody, so it tests nothing"
+    for note in notes:
+        assert not any(student in note.name for student in served)

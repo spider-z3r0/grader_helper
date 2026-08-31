@@ -1355,5 +1355,39 @@ def moderation_the_seed_reproduces_the_draw(module_3_sheet, moderation, pack):
     return
 
 
+@app.cell
+def moderation_a_pack_spanning_two_assessments(MODULE, module_sheet):
+    """MODULE LEADER -- the same thing on PS4001, which has two marked pieces.
+
+    PS4003 has one assessment with a download to copy from. PS4001 has two,
+    which is the ordinary case: the moderator gets each sampled student's
+    coursework 1 *and* coursework 2, under the one band folder.
+    """
+    ps4001_sample = sample_for_moderation(module_sheet, n=1, borderline="include")
+    ps4001_pack = build_moderation_pack(
+        MODULE, ps4001_sample, MODULE.root / "Moderation", overwrite=True
+    )
+
+    mo.md(f"""
+    **{ps4001_pack}** — `{ps4001_pack.root}`
+
+    | | |
+    |---|---|
+    | copied, per assessment | `{ps4001_pack.copied}` |
+    | nothing submitted | `{ps4001_pack.missing or "none"}` |
+
+    Both courseworks are in the pack. The quizzes are not: their submissions
+    folder holds Brightspace's CSV exports rather than student folders, so
+    there is nothing to copy and nothing has gone wrong.
+
+    The download also contains a `__MACOSX` directory and a stray
+    `index.html`, which is what a real unzipped download looks like. Neither
+    is a submission folder, so neither reaches the moderator — folder names
+    are parsed, and anything that is not a Brightspace submission simply does
+    not parse.
+    """)
+    return ps4001_pack, ps4001_sample
+
+
 if __name__ == "__main__":
     app.run()
