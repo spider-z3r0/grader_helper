@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 540 tests on Linux and 541 with a real Excel:
+Done, 542 tests on Linux and 543 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -310,9 +310,10 @@ Done, 540 tests on Linux and 541 with a real Excel:
 - `inspect_module_folder` and the **module dashboard**: point the tool at a
   folder and it loads the module there or offers to set one up -- see
   **Pointing at a folder**
-- The dashboard runs a coursework end to end: resolve resubmissions,
-  allocate, distribute, collect and reconcile, rename back -- and collects a
-  term of quizzes. See **Running an assessment from the app**
+- The dashboard runs a whole module end to end: resolve resubmissions,
+  allocate, distribute, collect and reconcile, rename back, collect the
+  quizzes, collate, the departmental sheet, the moderation pack and SI's
+  upload. See **Running an assessment from the app**
 - `reconcile_marks` and `resolve_multiple_subs`: two steps that existed only
   as notebook code, one of which was subtly wrong
 
@@ -499,6 +500,11 @@ The order the page offers, which is the order the work happens in:
 | 3 | collect and reconcile | `completed_grades.xlsx`, the audit |
 | 4 | rename the folders back | Brightspace's own names |
 | — | collect the quiz marks | one column, for a collected assessment |
+| 5 | collate the module | every mark in one frame, totalled and banded |
+| 6 | the departmental sheet | the department's workbook, laid out and filled |
+| 7 | the moderation pack | `Moderation/`, with its manifest and seed |
+| 8 | SI's upload | SI's own file, two columns filled |
+| 9 | the manual flags | moderated, sent, lodged |
 
 Three things driving a real module surfaced, none of them in the page:
 
@@ -539,9 +545,31 @@ format. And a feedback sheet is **never** replaced, with no tick that changes
 it: an existing sheet may carry a mark. The tick covers only the allocation
 and the grader workbooks, which nothing but this tool writes.
 
-Not done: the module-level half. Collating, the departmental sheet, the
-moderation pack and the SI upload all work in the library and are not yet
-behind buttons.
+**Collating is a button, not something the page does on its own**, because
+it reads every feedback sheet on the module. Everything after it works from
+what it produced, which is what keeps the reactivity simple: the frame is a
+cell variable, so there is no state to carry across clicks. `source` is
+offered as a choice and never as a fallback — "feedback" is what the
+students received, "collated" is what the graders reported, they are
+supposed to agree, and substituting one for the other silently would hide
+the disagreement worth knowing about.
+
+**Two paths a module needs and did not have keys for.**
+`departmental_template` is the department's blank workbook: it is their file
+and it changes year to year, so a module keeps its own copy rather than the
+package shipping one and quietly using last year's. `si_file` already
+existed. The setup form asks for both; a module.toml written before they
+existed has to be hand-edited, because the writer only ever updates keys
+already in the file, and the page prints the exact lines to add.
+
+**The manual flags are answered one at a time.** Chained, a click on
+"moderated" with no assessment chosen fell through and set one of the module
+flags instead — a flag nobody asked for, on a record nobody was looking at.
+
+Not done: the scratch copy. Every step writes straight into the module
+folder, which was a deliberate choice for a rehearsal on last year's data
+(see `docs/dashboard-scope.md`) and is still the thing to design before
+anyone else runs this.
 
 ### Next
 

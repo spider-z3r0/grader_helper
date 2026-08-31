@@ -250,3 +250,87 @@ def test_distribution_never_replaces_a_feedback_sheet(module_on_disk, dashboard)
     names["distribute_sheets"](cw1, class_list)
 
     assert load_workbook(sheet).active[cw1.grade_cell].value == before
+
+
+@pytest.fixture
+def marked_module(tmp_path, repo_root):
+    """A module whose marking is already done, ready to be collated.
+
+    The departmental template is the department's own workbook, which lives
+    in this repo. A real module keeps its own copy, so this puts one in the
+    module folder and names it -- by editing the file directly, because
+    ModuleFile.save only ever updates keys that are already there.
+    """
+    sys.path.insert(0, str(repo_root / "tests"))
+    from fake_module import make_fake_module
+
+    root = tmp_path / "PS4001"
+    make_fake_module(root, distributed=True, marked=True, quizzes=True)
+
+    shutil.copy(
+        repo_root / "Dept grade sheet Template 2026.xlsx", root / "template.xlsx"
+    )
+    module_file = root / "module.toml"
+    module_file.write_text(
+        module_file.read_text(encoding="utf-8").replace(
+            "[paths]", '[paths]\ndepartmental_template = "template.xlsx"', 1
+        ),
+        encoding="utf-8",
+    )
+    return root
+
+
+def test_the_module_level_steps_run_from_the_buttons(marked_module, dashboard):
+    """Collate, the departmental sheet, the moderation pack, SI's upload."""
+    names = dashboard(marked_module)
+    module = names["found"].module
+    class_list = names["class_list"]
+
+    # --- 5. collate -------------------------------------------------------
+    marks, sheet = names["collate_the_module"](module, class_list, "feedback")
+
+    assert len(sheet) == len(class_list), "every enrolled student reaches the sheet"
+    assert "Total % Grade" in sheet.columns and "Letter Grade" in sheet.columns
+    assert set(module.grade_sheet_columns) <= set(marks.columns)
+
+    # --- 6. the departmental sheet ---------------------------------------
+    path, written = names["write_the_departmental_sheet"](
+        module, sheet, module.root / "PS4001 grades.xlsx"
+    )
+
+    assert path.exists()
+    assert written.written == len(sheet)
+    assert ModuleFile.load(marked_module).module.status.departmental_sheet_written
+
+    # --- 7. the moderation pack ------------------------------------------
+    sample = names["draw_the_sample"](sheet, 1, "include")
+    pack = names["build_the_pack"](module, sample, module.root / "Moderation")
+
+    assert pack.manifest.is_file()
+    assert len(sample.selected) > 0
+    assert ModuleFile.load(marked_module).module.status.moderation_pack_built
+
+    # --- 8. SI's upload ---------------------------------------------------
+    upload = names["fill_si_upload"](
+        module, sheet, module.root / "PS4001_upload.CSV"
+    )
+
+    assert upload.filled > 0
+    assert not upload.not_enrolled
+    assert ModuleFile.load(marked_module).module.status.si_file_written
+
+
+def test_the_sample_can_be_drawn_again_from_its_own_seed(marked_module, dashboard):
+    """What makes a draw defensible months later.
+
+    The pack records the seed it drew with, so "why these students?" has an
+    answer that can be re-run rather than asserted.
+    """
+    names = dashboard(marked_module)
+    module = names["found"].module
+    _, sheet = names["collate_the_module"](module, names["class_list"], "feedback")
+
+    first = names["draw_the_sample"](sheet, 1, "include")
+    again = names["draw_the_sample"](sheet, 1, "include", seed=first.seed)
+
+    assert list(again.selected["Student ID"]) == list(first.selected["Student ID"])

@@ -73,8 +73,13 @@ folder or sets one up, and shows what is in it. See **Pointing at a folder** in
 - The page names any assessment missing what marking needs, and exempts the
   ones collected from Brightspace.
 
-What is **not** built: running any step from the page. That is the next chunk,
-and it is where the scratch copy below has to be designed.
+Also built: every step, from resolving resubmissions to SI's upload. See
+**Running an assessment from the app** in `docs/development-notes.md`.
+
+What is **not** built: the scratch copy. Every step writes straight into the
+module folder. That was decided deliberately for a rehearsal against last
+year's data -- it is real but finished, backed up, and not in the repo -- and
+it is the thing to design before anyone else runs this.
 
 ## Decided
 

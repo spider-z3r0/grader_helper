@@ -38,6 +38,11 @@ class ModulePaths(BaseModel):
     assessments: str = "assessments"
     classlist: str | None = None
     departmental_sheet: str | None = None
+    #: The department's blank workbook, which `build_departmental_sheet` lays
+    #: out for this module's assessments. It is the department's file and it
+    #: changes year to year, so a module keeps its own copy rather than the
+    #: package shipping one and quietly using last year's.
+    departmental_template: str | None = None
     #: The upload file the student information system issues, which we fill
     #: two columns of and hand back. Named by SI, not by us.
     si_file: str | None = None
@@ -226,6 +231,10 @@ class Module(BaseModel):
     @property
     def departmental_sheet_path(self) -> pl.Path | None:
         return self._resolve(self.paths.departmental_sheet)
+
+    @property
+    def departmental_template_path(self) -> pl.Path | None:
+        return self._resolve(self.paths.departmental_template)
 
     @property
     def si_file_path(self) -> pl.Path | None:

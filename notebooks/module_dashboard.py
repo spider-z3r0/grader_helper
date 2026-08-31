@@ -13,6 +13,13 @@ with app.setup():
     from grader_helper import (
         KEEP_CHOICES,
         alphabetise_folders,
+        build_departmental_sheet,
+        build_moderation_pack,
+        collate_module_marks,
+        prepare_data_for_departmental_template,
+        sample_for_moderation,
+        write_departmental_sheet,
+        write_si_marks,
         assign_graders_groups,
         assign_graders_individual,
         brightspace_name_folders,
@@ -28,6 +35,7 @@ with app.setup():
         save_grader_sheets,
         scan_multiple_subs,
     )
+    from grader_helper.moderation import BORDERLINE_MODES
     from grader_helper.file_operations.scan_multiple_submissions import (
         parse_brightspace_folder,
     )
@@ -333,9 +341,20 @@ def module_details():
         label="Class list file (optional)", placeholder="classlist.csv"
     )
     departmental = mo.ui.text(
-        label="Departmental grade sheet (optional)", placeholder="grades.xlsx"
+        label="Departmental grade sheet to write (optional)",
+        placeholder="PS4034 grades.xlsx",
     )
-    return classlist, code, departmental, leader, moderator, title, year
+    template = mo.ui.text(
+        label="Departmental blank template (optional)",
+        placeholder="Dept grade sheet Template 2026.xlsx",
+    )
+    si_file = mo.ui.text(
+        label="SI's upload file (optional)", placeholder="PS4034_SI.CSV"
+    )
+    return (
+        classlist, code, departmental, leader, moderator, si_file, template,
+        title, year,
+    )
 
 
 @app.cell
@@ -399,7 +418,10 @@ def assessment_rows(how_many):
 
 
 @app.cell
-def the_form(offer, rows, code, title, year, leader, moderator, classlist, departmental):
+def the_form(
+    offer, rows, code, title, year, leader, moderator, classlist, departmental,
+    template, si_file,
+):
     def _row_view(index, row):
         return mo.vstack(
             [
@@ -423,6 +445,7 @@ def the_form(offer, rows, code, title, year, leader, moderator, classlist, depar
             mo.hstack([code, title, year], justify="start"),
             mo.hstack([leader, moderator], justify="start"),
             mo.hstack([classlist, departmental], justify="start"),
+            mo.hstack([template, si_file], justify="start"),
             mo.md(
                 f"""
                 ### The assessment
@@ -542,7 +565,7 @@ def the_button(offer):
 @app.cell
 def write_the_module(
     create, found, offer, specs, code, title, year, leader, moderator, classlist,
-    departmental,
+    departmental, template, si_file,
 ):
     def _optional(field) -> str | None:
         return field.value.strip() or None
@@ -551,6 +574,8 @@ def write_the_module(
         paths = {
             "classlist": _optional(classlist),
             "departmental_sheet": _optional(departmental),
+            "departmental_template": _optional(template),
+            "si_file": _optional(si_file),
         }
         handle = init_module(
             found.folder,
@@ -1262,6 +1287,469 @@ def do_quizzes(
             )
 
     quiz_marks
+    return
+
+
+@app.cell
+def module_steps_intro(loaded):
+    _md = mo.md(
+        """
+        ---
+
+        # The module as a whole
+
+        Once every assessment is collected: the marks in one frame, the
+        department's workbook, the moderation pack, and SI's upload file.
+
+        Collating reads every feedback sheet on the module, so it is a button
+        rather than something the page does on its own. Everything below it
+        works from what that produced.
+        """
+    )
+    _md if loaded else mo.md("")
+    return
+
+
+@app.cell
+def the_module_actions(found):
+    def collate_the_module(module, class_list, source: str):
+        # Reads only. `source` is not a fallback chain: "feedback" is what the
+        # students received and "collated" is what the graders reported, they
+        # are supposed to agree, and silently substituting one for the other
+        # would hide exactly the disagreement worth knowing about.
+        marks = collate_module_marks(module, class_list, source=source)
+        return marks, prepare_data_for_departmental_template(marks, module)
+
+    def write_the_departmental_sheet(module, sheet, destination, replace=False):
+        # Two calls, and the split matters: the builder writes the
+        # department's formulas and never a computed value, so the sheet
+        # still does its own arithmetic; the writer puts in the name, the id
+        # and each mark as awarded, and nothing else.
+        path = build_departmental_sheet(
+            module,
+            module.departmental_template_path,
+            destination,
+            overwrite=replace,
+        )
+        written = write_departmental_sheet(sheet, module, path)
+        found.file.record(written)
+        return path, written
+
+    def draw_the_sample(sheet, n: int, borderline: str, seed=None):
+        # With no seed one is generated and handed back, and it is what makes
+        # the draw defensible months later.
+        return sample_for_moderation(sheet, n=n, borderline=borderline, seed=seed)
+
+    def build_the_pack(module, sample, destination, replace=False):
+        pack = build_moderation_pack(module, sample, destination, overwrite=replace)
+        found.file.record(pack)
+        return pack
+
+    def fill_si_upload(module, sheet, destination):
+        upload = write_si_marks(sheet, module.si_file_path, destination)
+        found.file.record(upload)
+        return upload
+
+    return (
+        build_the_pack,
+        collate_the_module,
+        draw_the_sample,
+        fill_si_upload,
+        write_the_departmental_sheet,
+    )
+
+
+@app.cell
+def collate_widgets():
+    source = mo.ui.radio(
+        options=["feedback", "collated"],
+        value="feedback",
+        label="**Take each mark from**",
+    )
+    collate = mo.ui.run_button(label="Collate the module")
+    return collate, source
+
+
+@app.cell
+def collate_panel(loaded, collate, source, class_list):
+    _panel = mo.vstack(
+        [
+            mo.md(
+                """
+                ### 5. Collate the module
+
+                Every assessment's marks in one frame, then totalled and
+                banded in the department's column order. **feedback** is what
+                the students were given; **collated** is what the graders
+                reported. They are supposed to agree — step 3 is the check —
+                and this will not fall back from one to the other.
+                """
+            ),
+            source,
+            collate,
+        ]
+    )
+    _panel if (loaded and class_list is not None) else mo.md("")
+    return
+
+
+@app.cell
+def do_collate(collate, collate_the_module, attempt, failed, found, loaded, class_list, source):
+    if not (collate.value and loaded and class_list is not None):
+        module_marks, module_sheet, collated_note = None, None, mo.md("")
+    else:
+        _done, _error = attempt(
+            lambda: collate_the_module(found.module, class_list, source.value)
+        )
+        if _error is not None:
+            module_marks, module_sheet = None, None
+            collated_note = failed("Collating the module", _error)
+        else:
+            module_marks, module_sheet = _done
+            _banded = module_sheet["Letter Grade"].value_counts().sort_index()
+            collated_note = mo.vstack(
+                [
+                    mo.md(
+                        f"""
+                        ### Collated
+
+                        **{len(module_sheet)} students** ·
+                        `{list(module_sheet.columns)}`
+
+                        Grades: `{_banded.to_dict()}`
+
+                        A blank mark counts as zero, the way the sheet's own
+                        `SUM` reads an empty cell — so a module collated
+                        before all the marking is in reads as a complete set
+                        of low grades.
+                        """
+                    ),
+                    module_sheet,
+                ]
+            )
+
+    collated_note
+    return module_marks, module_sheet
+
+
+@app.cell
+def departmental_button(loaded, found, module_sheet):
+    dept_sheet = mo.ui.run_button(label="Build and fill the departmental sheet")
+
+    def _panel():
+        template = found.module.departmental_template_path
+        if template is None or not template.exists():
+            return mo.md(
+                f"""
+                ### 6. The departmental sheet
+
+                *Not yet — this module has no departmental template.* Put the
+                department's blank workbook in the module folder and name it
+                in `module.toml`:
+
+                ```toml
+                [paths]
+                departmental_template = "Dept grade sheet Template 2026.xlsx"
+                ```
+
+                It is the department's file and it changes year to year, so
+                the module keeps its own copy rather than this tool using
+                whichever one it happens to have.
+                """
+            )
+        return mo.vstack(
+            [
+                mo.md(
+                    f"""
+                    ### 6. The departmental sheet
+
+                    Lays the department's workbook out for this module's
+                    assessments and fills in the name, the id and each mark as
+                    awarded. The weighted columns and the total are left to
+                    the sheet's own formulas — where our arithmetic and the
+                    sheet disagree, the sheet wins.
+
+                    Template: `{template.name}`
+                    """
+                ),
+                dept_sheet,
+            ]
+        )
+
+    (_panel() if module_sheet is not None else mo.md("")) if loaded else mo.md("")
+    return (dept_sheet,)
+
+
+@app.cell
+def do_departmental(
+    dept_sheet, write_the_departmental_sheet, attempt, failed, found, module_sheet,
+    replace,
+):
+    if not (dept_sheet.value and module_sheet is not None):
+        departmental_done = mo.md("")
+    else:
+        _module = found.module
+        _destination = (
+            _module.departmental_sheet_path
+            or _module.root / f"{_module.code} grades.xlsx"
+        )
+        _done, _error = attempt(
+            lambda: write_the_departmental_sheet(
+                _module, module_sheet, _destination, replace.value
+            )
+        )
+        if _error is not None:
+            departmental_done = failed("The departmental sheet", _error)
+        else:
+            _path, _written = _done
+            _flag = found.file.module.status.departmental_sheet_written
+            departmental_done = mo.md(
+                f"""
+                ### Written
+
+                **{_written}** — `{_path}`
+
+                Recorded `departmental_sheet_written`:
+                **{"yes" if _flag else "no"}**
+                """
+            )
+
+    departmental_done
+    return
+
+
+@app.cell
+def moderation_widgets():
+    per_band = mo.ui.number(
+        start=1, stop=5, step=1, value=1, label="students per band"
+    )
+    borderline_mode = mo.ui.dropdown(
+        options=list(BORDERLINE_MODES), value="include", label="borderline cases"
+    )
+    moderate = mo.ui.run_button(label="Draw the sample and build the pack")
+    return borderline_mode, moderate, per_band
+
+
+@app.cell
+def moderation_panel(loaded, module_sheet, per_band, borderline_mode, moderate):
+    _panel = mo.vstack(
+        [
+            mo.md(
+                """
+                ### 7. The moderation pack
+
+                A random draw of *n* per grade band, plus the students within
+                a point of the next grade up, and the folders they submitted
+                copied into `Moderation/`. The draw records its own seed, in
+                the manifest, which is what makes it defensible months later.
+                """
+            ),
+            mo.hstack([per_band, borderline_mode], justify="start"),
+            moderate,
+        ]
+    )
+    (_panel if module_sheet is not None else mo.md("")) if loaded else mo.md("")
+    return
+
+
+@app.cell
+def do_moderation(
+    moderate, draw_the_sample, build_the_pack, attempt, failed, found, module_sheet,
+    per_band, borderline_mode, replace,
+):
+    if not (moderate.value and module_sheet is not None):
+        moderation_done = mo.md("")
+    else:
+        def _moderate():
+            sample = draw_the_sample(
+                module_sheet, int(per_band.value), borderline_mode.value
+            )
+            pack = build_the_pack(
+                found.module,
+                sample,
+                found.module.root / "Moderation",
+                replace.value,
+            )
+            return sample, pack
+
+        _done, _error = attempt(_moderate)
+        if _error is not None:
+            moderation_done = failed("The moderation pack", _error)
+        else:
+            _sample, _pack = _done
+            _flag = found.file.module.status.moderation_pack_built
+            moderation_done = mo.vstack(
+                [
+                    mo.md(
+                        f"""
+                        ### Pack built
+
+                        **{_sample}**
+
+                        **{_pack}** — `{_pack.root}`
+
+                        Bands that could not fill the quota:
+                        `{_sample.short_bands or "none"}`
+
+                        Selected but submitted nothing: `{_pack.missing or "none"}`
+                        — named rather than left as an empty folder, which
+                        would read as work already been through.
+
+                        Recorded `moderation_pack_built`:
+                        **{"yes" if _flag else "no"}**
+                        """
+                    ),
+                    _sample.selected,
+                ]
+            )
+
+    moderation_done
+    return
+
+
+@app.cell
+def si_button(loaded, found, module_sheet):
+    si = mo.ui.run_button(label="Fill in SI's upload file")
+
+    def _panel():
+        issued = found.module.si_file_path
+        if issued is None or not issued.exists():
+            return mo.md(
+                """
+                ### 8. The SI upload
+
+                *Not yet — this module has no SI file.* SI issues it; nothing
+                here generates one. Put it in the module folder and name it:
+
+                ```toml
+                [paths]
+                si_file = "PS4034_SI.CSV"
+                ```
+                """
+            )
+        return mo.vstack(
+            [
+                mo.md(
+                    f"""
+                    ### 8. The SI upload
+
+                    Fills two columns of the file SI issued and leaves the
+                    rest of it exactly as it arrived — its encoding, its line
+                    endings and its quoting included. Written alongside it as
+                    a copy; the issued file is not touched.
+
+                    Issued: `{issued.name}`
+                    """
+                ),
+                si,
+            ]
+        )
+
+    (_panel() if module_sheet is not None else mo.md("")) if loaded else mo.md("")
+    return (si,)
+
+
+@app.cell
+def do_si(si, fill_si_upload, attempt, failed, found, module_sheet):
+    if not (si.value and module_sheet is not None):
+        si_done = mo.md("")
+    else:
+        _module = found.module
+        _done, _error = attempt(
+            lambda: fill_si_upload(
+                _module, module_sheet, _module.root / f"{_module.code}_upload.CSV"
+            )
+        )
+        if _error is not None:
+            si_done = failed("The SI upload", _error)
+        else:
+            _flag = found.file.module.status.si_file_written
+            si_done = mo.md(
+                f"""
+                ### Filled
+
+                **{_done}**
+
+                Recorded `si_file_written`: **{"yes" if _flag else "no"}**
+
+                {"" if _flag else
+                 "Not recorded. A student with a mark whom SI has no row for "
+                 "means the two records disagree, which is not a finished "
+                 "step."}
+                """
+            )
+
+    si_done
+    return
+
+
+@app.cell
+def manual_widgets():
+    # The half only a person can know. We wrote a file; we cannot see that it
+    # was sent, read or accepted.
+    mark_moderated = mo.ui.run_button(label="This assessment has been moderated")
+    mark_sent = mo.ui.run_button(label="The sheet has gone to the department")
+    mark_submitted = mo.ui.run_button(label="The upload has been lodged with SI")
+    return mark_moderated, mark_sent, mark_submitted
+
+
+@app.cell
+def manual_panel(loaded, chosen, mark_moderated, mark_sent, mark_submitted):
+    _panel = mo.vstack(
+        [
+            mo.md(
+                f"""
+                ### 9. The things only you know
+
+                Everything above is set from what a step produced. These are
+                not: a pack having been *built* is not a pack having been
+                *read*, and a sheet having been written is not a sheet having
+                been sent.
+
+                The first applies to **{chosen.id if chosen is not None else "the chosen assessment"}**;
+                the other two to the module.
+                """
+            ),
+            mark_moderated,
+            mark_sent,
+            mark_submitted,
+        ]
+    )
+    _panel if loaded else mo.md("")
+    return
+
+
+@app.cell
+def do_manual(
+    mark_moderated, mark_sent, mark_submitted, attempt, failed, found, chosen, loaded
+):
+    def _set():
+        # Each button answered on its own. Chained, a click on the first with
+        # no assessment chosen would fall through and set one of the others,
+        # which is a flag nobody asked for on a record nobody was looking at.
+        done = []
+        if mark_moderated.value and chosen is not None:
+            found.file.set_status(chosen.id, moderated=True)
+            done.append(f"`{chosen.id}` marked as moderated.")
+        if mark_sent.value:
+            found.file.set_module_status(sent_to_department=True)
+            done.append("Marked as sent to the department.")
+        if mark_submitted.value:
+            found.file.set_module_status(si_submitted=True)
+            done.append("Marked as lodged with SI.")
+        return " ".join(done) if done else "Nothing to record — choose an assessment first."
+
+    if not (loaded and (mark_moderated.value or mark_sent.value or mark_submitted.value)):
+        manual_done = mo.md("")
+    else:
+        _done, _error = attempt(_set)
+        manual_done = (
+            failed("Recording that", _error)
+            if _error is not None
+            else mo.md(f"{_done} Click **Re-read this folder** to see it.")
+        )
+
+    manual_done
     return
 
 
