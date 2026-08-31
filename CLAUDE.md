@@ -47,6 +47,7 @@ should show the import line.
 | Brightspace folder names | **Sources of truth → Brightspace formats** |
 | the Excel read/write functions | **The Excel round trip** |
 | quizzes, pass marks, free passes | **Quiz collection** |
+| the dashboard, opening a module folder | **Pointing at a folder** |
 | what to build next | **Next** |
 | something looks broken | **Known gaps** — it may be known |
 

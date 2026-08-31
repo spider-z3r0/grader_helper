@@ -183,6 +183,45 @@ is relative to it.
 When you have something worth keeping, `marimo run <notebook>.py` serves it as
 an app with the code hidden, which is the non-technical-colleague view.
 
+## 7. Open a real module
+
+The walkthrough above builds a fake module to practise on. To work on a real
+one:
+
+```powershell
+uv run marimo run notebooks\module_dashboard.py
+```
+
+`marimo run` serves it with the code hidden, which is the view to give a
+colleague; `marimo edit` opens the same file with the code visible.
+
+Choose the module's folder in the browser at the top — the one for a single
+year of a single module, `OneDrive\teaching\2026\Sem1\PS4034`. If a
+`module.toml` is in there it loads and the page shows the module: its
+assessment, its weights, the columns each piece produces, what has been done
+so far, and whether the folders it names exist. If the folder is empty you
+get a form instead: how many pieces of assessment, then the two numbers for
+each, and a button that writes `module.toml` and creates the folders.
+
+Clicking down from your home folder to a module gets old. Set the browser's
+starting point once:
+
+```powershell
+$env:GRADER_HELPER_START = "$env:OneDrive\teaching"
+uv run marimo run notebooks\module_dashboard.py
+```
+
+`$env:GRADER_HELPER_MODULE` goes further and opens straight onto one module
+folder. Neither is stored by grader_helper — `module.toml` is the only file
+it writes, and it holds no absolute paths, so a module folder still works
+after OneDrive syncs it to another machine.
+
+If a `module.toml` is there but will not load, the page shows the error and
+the path to edit, and does **not** offer to set the folder up again. That is
+deliberate: the file holds the graders, the quiz rules and everything
+recorded about progress. Fix the line it complains about, then click
+**Re-read this folder**.
+
 ## Troubleshooting
 
 **`uv` not recognised** — reopen PowerShell after installing it; the installer

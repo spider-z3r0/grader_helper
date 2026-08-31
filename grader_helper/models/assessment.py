@@ -54,6 +54,13 @@ class AssessmentType(str, Enum):
     QUIZ = "quiz"
 
 
+#: The types whose marks are collected from Brightspace's own exports, and
+#: so the only ones for which ``pass_mark`` and ``free_passes`` mean
+#: anything. Named rather than left inline in the validator so that a form
+#: offering those fields and the model accepting them cannot drift apart.
+COLLECTED_TYPES = (AssessmentType.QUIZ, AssessmentType.MCQ)
+
+
 class AssessmentStatus(BaseModel):
     """Where an assessment has got to.
 
@@ -187,7 +194,7 @@ class Assessment(BaseModel):
         would do with it. Refusing is cheaper than the conversation about
         why a coursework's pass mark had no effect.
         """
-        collected = (AssessmentType.QUIZ, AssessmentType.MCQ)
+        collected = COLLECTED_TYPES
         if self.type in collected:
             return self
 

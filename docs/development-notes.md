@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 381 tests:
+Done, 400 tests:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -304,6 +304,9 @@ Done, 381 tests:
   polars in the package
 - `collate_module_marks`: a whole module's marks in one frame, whatever
   kind of assessment they came from -- see below
+- `inspect_module_folder` and the **module dashboard**: point the tool at a
+  folder and it loads the module there or offers to set one up -- see
+  **Pointing at a folder**
 
 ### The rewire onto `Module`
 
@@ -374,6 +377,70 @@ Validation was extracted out of `ModuleFile.load` into `_to_module` so both
 the reader and the writer use it. A file this package writes is therefore
 checked by exactly the path that reads it back.
 
+### Pointing at a folder
+
+The first thing anyone does, and the front door to `init_module`. Two pieces:
+`inspect_module_folder` in `models/module_folder.py`, and
+`notebooks/module_dashboard.py` on top of it.
+
+**Four answers, not two.** `ModuleFile.load` raises `FileNotFoundError` for
+"nothing here" and a `ValidationError` for "a module.toml that will not
+load", and a caller that catches both in one `except` cannot tell them
+apart -- yet they need opposite offers:
+
+| state | what it is | what is offered |
+|---|---|---|
+| `LOADED` | a module.toml that loaded | the module |
+| `UNINITIALISED` | a directory with no module.toml | the setup form |
+| `UNREADABLE` | a module.toml that will not load | the error, and the path to edit |
+| `MISSING` | nothing at that path | "check the path" |
+
+`can_initialise` is true for `UNINITIALISED` **only**. A broken file is
+deliberately excluded: `init_module` refuses to overwrite, so offering setup
+there would mean `overwrite=True`, and that file holds the graders, the quiz
+rules and every status flag recorded so far. A mistyped weight is fixed by
+correcting the weight.
+
+`inspect_module_folder` never raises. Whatever a hand-edited TOML does wrong
+-- malformed syntax, a future `schema_version`, the wrong encoding -- the
+caller's move is the same, so it is returned as data. That is what lets a
+dashboard cell call it on every click without being able to crash the page.
+
+**The dashboard has no memory, by design.** No recents list, no stored
+teaching root, no config file: you say which module you are on by choosing
+its folder. Two environment variables exist -- `GRADER_HELPER_START` opens
+the browser somewhere other than home, `GRADER_HELPER_MODULE` preselects a
+folder -- and neither is written by anything. `module.toml` stays the only
+file this package writes, and it still holds nothing absolute.
+
+Three things worth knowing about the form:
+
+- **The offer decision is made once.** `offer` is computed in one cell and
+  used by the five below it. A copy per cell is a copy that can disagree,
+  and the dangerous disagreement is a cell offering to overwrite the
+  module.toml the cell above it just reported as broken.
+- **The collection rules follow a tick, not the type.** `pass_mark` and
+  `free_passes` are written only when a row is ticked *collected from
+  Brightspace exports*. Inferring from the type looks tidy and is wrong: an
+  MCQ may be collected or marked by hand, the type does not say which, and
+  an MCQ that acquires a pass mark of 80 by default is scored as one quiz
+  passed -- worth a single mark -- instead of read straight off. Which types
+  may be ticked is `COLLECTED_TYPES`, lifted out of the validator that
+  enforces it so the form and the model cannot drift.
+- **Validation stays in the model.** The form shows the running weight total
+  and nothing else; everything that can be wrong is caught by `init_module`,
+  which validates before it touches the disk, and its message is displayed.
+  Nothing is written when it refuses.
+
+Verified by reintroducing four bugs and watching the right tests fail:
+treating an unreadable file as an empty folder (5 tests), `can_initialise`
+as "anything not loaded" (1), offering setup for anything that did not load
+(2), and inferring collection from the type (2).
+
+Not done here: rubrics, grade cells and graders are not in the form -- add
+them to `module.toml`, where its own comments explain them -- and the
+dashboard shows a module but does not yet run a step against it.
+
 ### Next
 
 The route to a module a leader can run end to end, in order. Each step
@@ -396,12 +463,15 @@ assumes the one before it works.
    `Assessment.status.moderated` is the only hook.
 4. **Final marks for upload to SI** — whatever format the student
    information system wants, which nothing in the package knows about yet.
-5. **Module initialisation as a workflow** — a module leader specifying
-   paths, weightings and how many assessments, rather than hand-editing
-   `module.toml`. `init_module` is the machinery; this is the front door to
-   it.
-6. **Marimo dashboard** — dropdowns and convenience features. The
-   non-technical-colleague story, built strictly on top of the library.
+5. ~~**Module initialisation as a workflow**~~ — done. A module leader
+   chooses how many assessments and fills in the two numbers for each,
+   rather than hand-editing `module.toml`. See **Pointing at a folder**.
+6. **Marimo dashboard** — started. `notebooks/module_dashboard.py` opens a
+   module or sets one up, and displays what is there. Still to come: running
+   the steps from it, and rolling a module forward into next year's folder
+   (`teaching/2026/Sem1/PS4034` from `teaching/2025/Sem1/PS4034`) --
+   assessment shape, weights, quiz rules and people copied, status flags
+   reset, marks dropped.
 
 **Polars migration** is unblocked but not scheduled: the Excel round-trip
 tests are the contract a port has to keep, and it can land whenever it stops
