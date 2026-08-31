@@ -35,7 +35,9 @@ House convention: ``pl`` is pathlib, ``pr`` is polars.
 from typing import Callable, NamedTuple
 
 from .file_operations.distribute_feedback_sheets import Distribution
+from .file_operations.save_distributed_graders import Allocation
 from .file_operations.write_departmental_sheet import DepartmentalWrite
+from .ingesting.ingest_completed_graderfiles import Collation
 from .moderation.pack import Pack
 from .si_upload import SiUpload
 
@@ -54,6 +56,19 @@ class Evidence(NamedTuple):
 #: One rule per result type. Adding a step means adding a line here and
 #: nothing else.
 RULES: dict[type, Evidence] = {
+    # The allocation file existing is what says the graders were allocated --
+    # the artefact is the evidence. An empty one is not an allocation.
+    Allocation: Evidence(
+        flag="graders_allocated",
+        satisfied=lambda r: r.students > 0,
+        scope="assessment",
+    ),
+    # Likewise completed_grades: the record the department receives.
+    Collation: Evidence(
+        flag="grades_collected",
+        satisfied=lambda r: r.students > 0,
+        scope="assessment",
+    ),
     # Sheets were distributed if any were copied *and* nothing was left
     # unrecognised. A run that matched forty folders and missed one has not
     # finished, and the tick would hide the one.

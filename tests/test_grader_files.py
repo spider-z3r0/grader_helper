@@ -148,7 +148,11 @@ def test_no_graders_is_refused(tmp_path, allocated):
 
 
 def test_the_master_sheet_holds_every_student(tmp_path, allocated):
-    target = save_distributed_graders(allocated, tmp_path)
+    allocation = save_distributed_graders(allocated, tmp_path)
+    target = allocation.path
+    assert allocation.students == len(allocated), (
+        "the count is the evidence record() reads"
+    )
 
     written = pd.read_excel(target, dtype={"Student ID": str})
 

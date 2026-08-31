@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 494 tests on Linux and 495 with a real Excel:
+Done, 496 tests on Linux and 497 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -912,10 +912,19 @@ the same failure as a total missing a component. So the flag comes from the
 
 | result | flag | evidence |
 |---|---|---|
+| `Allocation` | `graders_allocated` | `distributed.xlsx` holds students |
 | `Distribution` | `sheets_distributed` | something copied or skipped, and nothing unmatched |
+| `Collation` | `grades_collected` | `completed_grades` holds students |
 | `DepartmentalWrite` | `departmental_sheet_written` | rows written |
 | `Pack` | `moderation_pack_built` | the manifest exists |
 | `SiUpload` | `si_file_written` | marks filled, and SI's roll fully accounted for |
+
+**The artefact is the evidence.** Every rule reads the file the step produced:
+`distributed.xlsx` existing is what says the graders were allocated,
+`completed_grades` that the marks came back, `moderation_sample.csv` that a
+pack was drawn. Existence alone is not enough, though -- an empty
+`distributed.xlsx` is not an allocation -- so each rule also asks how many
+students are in it.
 
 `ModuleFile.record(result, assessment_id=None)` looks the rule up and sets the
 flag only if the evidence supports it. A result that falls short leaves the
@@ -926,15 +935,23 @@ flag on no evidence is worse than not setting one.
 Adding a step means adding a line to `RULES` and nothing else. The library
 functions stay pure and path-based; they never learn about `ModuleFile`.
 
-Two details worth knowing:
+Three functions gained evidence-carrying returns so their artefact could be
+read:
 
-* **`write_departmental_sheet` now returns a `DepartmentalWrite`**, not a bare
+* **`write_departmental_sheet` returns a `DepartmentalWrite`**, not a bare
   path. A path said the function had run; it did not say whether anything
   reached the sheet, so there was no evidence to read.
-* **The rules live one layer up**, in `recording.py`, because they import
-  `file_operations` and `moderation` and those import `models`.
-  `ModuleFile.record` imports the registry inside the method, which keeps the
-  layering honest without a cycle.
+* **`save_distributed_graders` returns an `Allocation`** for the same reason.
+* **`save_collated_grades` is new**, split out of
+  `ingest_completed_graderfiles` so writing `completed_grades` has a function
+  that reports what went into it. `ingest_completed_graderfiles(save=True)`
+  calls it, so there is still one definition of what that file is and where it
+  goes, and its own return is unchanged -- callers still get the frame.
+
+**The rules live one layer up**, in `recording.py`, because they import
+`file_operations`, `ingesting` and `moderation`, and those import `models`.
+`ModuleFile.record` imports the registry inside the method, which keeps the
+layering honest without a cycle.
 
 #### `[module_status]`, and the bug writing it caused
 
@@ -949,13 +966,15 @@ silently wiping every assessment flag in the file. `[status]` is popped first
 now, and `test_module_status_and_assessment_status_do_not_clobber_each_other`
 is the guard.
 
-#### Still set by hand
+#### What is left manual, and why
 
-`graders_allocated` and `grades_collected` have no automatic rule yet, because
-their producing functions return a path and a frame — neither says whether the
-step finished. Giving `save_distributed_graders` and the collection path
-evidence-carrying returns, the way `write_departmental_sheet` just got one, is
-the next slice.
+Only `moderated` and the two module-level ones. Every other flag now comes
+from an artefact, and `test_every_assessment_flag_can_now_be_recorded` says so
+— it fails if a new assessment flag appears with nothing to justify it.
+
+`moderated`, `sent_to_department` and `si_submitted` are manual because
+nothing on disk can settle them: a pack existing is not a pack having been
+read, and a file written is not a file sent.
 
 ### The SI upload
 

@@ -36,6 +36,7 @@ with app.setup():
         flag_borderline,
         read_moderation_manifest,
         sample_for_moderation,
+        save_collated_grades,
         save_grader_sheets,
         scan_multiple_subs,
         write_departmental_sheet,
@@ -237,7 +238,7 @@ def cw1_save_the_grader_sheets(A, GRADERS, allocation):
     )
 
     mo.md(f"""
-    - master: `{master.name}` at the assessment root
+    - master: **{master}** at the assessment root
     - workbooks: `{[p.name for p in workbooks.values()]}` in `grading_output/`
     """)
     return
@@ -360,12 +361,16 @@ def cw1_leader_collates_the_grade_sheets(A, GRADERS):
         A.grading_output_path,
         GRADERS,
         file_type="excel",
-        save=True,
-        overwrite=True,
+    )
+    # Writing the collated file is its own call, so the artefact reports what
+    # went into it -- `completed_grades.xlsx` existing is what says the grades
+    # were collected, and an empty one is not a collection.
+    collation = save_collated_grades(
+        completed, A.grading_output_path, file_type="excel", overwrite=True
     )
 
-    completed
-    return (completed,)
+    mo.md(f"**{collation}**")
+    return collation, completed
 
 
 @app.cell
@@ -427,22 +432,16 @@ def cw1_rename_for_reupload(A, rename_log):
 
 
 @app.cell
-def cw1_record_progress(HANDLE, distribution):
-    # `record` reads the flag off what the step returned. A Distribution that
-    # copied nothing, or left a folder unrecognised, does *not* set
-    # sheets_distributed -- a green tick against a step that did nothing is
-    # the same failure as a total missing a component.
-    HANDLE.record(distribution, ASSESSMENT_1_ID)
-
-    # These two are still by hand. `save_distributed_graders` returns a path
-    # and `catch_grades` a frame, and neither says whether the step finished,
-    # so there is no evidence for `record` to read yet. See the notes'
-    # "Keeping status".
-    HANDLE.set_status(
-        ASSESSMENT_1_ID,
-        graders_allocated=True,
-        grades_collected=True,
-    )
+def cw1_record_progress(HANDLE, master, distribution, collation):
+    # Every flag here comes from an artefact. `record` reads the evidence off
+    # what each step returned and sets the flag only if it holds up: a
+    # Distribution that copied nothing, or left a folder unrecognised, does
+    # *not* set sheets_distributed. A green tick against a step that did
+    # nothing is the same failure as a total missing a component.
+    # `evidence` would clash: marimo counts a loop variable as a definition,
+    # and every name in the notebook must be defined in exactly one cell.
+    for cw1_evidence in (master, distribution, collation):
+        HANDLE.record(cw1_evidence, ASSESSMENT_1_ID)
 
     # Read back the assessment we just wrote, not the other one.
     status = ModuleFile.load(ROOT).module.assessment(ASSESSMENT_1_ID).status
@@ -525,7 +524,7 @@ def cw2_save_the_grader_sheets(A2, GRADERS2, allocation2):
     )
 
     mo.md(f"""
-    - master: `{master2.name}` at the assessment root
+    - master: **{master2}** at the assessment root
     - workbooks: `{[p.name for p in workbooks2.values()]}` in `grading_output/`
     """)
     return
@@ -1560,8 +1559,8 @@ def status_record_the_module_level_steps(
     """MODULE LEADER -- and mostly not the module leader at all."""
     # One call per artefact. `record` looks up the rule for the result's type
     # and sets the flag only if the evidence supports it.
-    for evidence in (written, pack, si_results[0]):
-        HANDLE.record(evidence)
+    for module_evidence in (written, pack, si_results[0]):
+        HANDLE.record(module_evidence)
 
     recorded_status = ModuleFile.load(ROOT).module.status
 

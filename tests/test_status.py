@@ -20,8 +20,10 @@ import sys
 import pytest
 
 from grader_helper.file_operations.distribute_feedback_sheets import Distribution
+from grader_helper.file_operations.save_distributed_graders import Allocation
 from grader_helper.file_operations.write_departmental_sheet import DepartmentalWrite
 from grader_helper.models import ModuleFile, ModuleStatus
+from grader_helper.ingesting.ingest_completed_graderfiles import Collation
 from grader_helper.recording import RULES, evidence_for
 from grader_helper.si_upload import SiUpload
 
@@ -67,6 +69,32 @@ def test_a_rerun_that_skipped_everything_still_counts():
     second run is *supposed* to do -- they may already carry marks."""
     rerun = Distribution(copied={}, skipped={"1": pl.Path("a")}, unmatched=[])
     assert evidence_for(rerun)[1] is True
+
+
+def test_the_allocation_and_collation_artefacts_need_students_in_them():
+    """The artefact is the evidence -- `distributed.xlsx` existing is what says
+    the graders were allocated, `completed_grades` that the marks came back.
+    An empty file is neither, and its existence alone would say otherwise."""
+    assert evidence_for(Allocation(pl.Path("distributed.xlsx"), students=40)) == (
+        "graders_allocated", True, "assessment"
+    )
+    assert evidence_for(Allocation(pl.Path("distributed.xlsx"), students=0))[1] is False
+
+    assert evidence_for(Collation(pl.Path("completed_grades.csv"), students=40)) == (
+        "grades_collected", True, "assessment"
+    )
+    assert evidence_for(Collation(pl.Path("completed_grades.csv"), students=0))[1] is False
+
+
+def test_every_assessment_flag_can_now_be_recorded():
+    """All four, from an artefact rather than by hand."""
+    from grader_helper.models.assessment import AssessmentStatus
+
+    covered = {
+        rule.flag for rule in RULES.values() if rule.scope == "assessment"
+    }
+    manual = {"moderated"}  # a person read the pack; nothing on disk says so
+    assert covered | manual == set(AssessmentStatus.model_fields)
 
 
 def test_the_departmental_sheet_needs_rows_in_it():

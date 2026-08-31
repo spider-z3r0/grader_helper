@@ -14,6 +14,7 @@ then flowed into ingest_completed_graderfiles as a spurious column.
 """
 
 import pathlib as pl
+from typing import NamedTuple
 
 from ..dependencies import pd
 
@@ -21,12 +22,29 @@ from ..dependencies import pd
 DISTRIBUTED_FILENAME = "distributed.xlsx"
 
 
+class Allocation(NamedTuple):
+    """What `save_distributed_graders` wrote.
+
+    The artefact *is* the evidence: `distributed.xlsx` existing is what says
+    the graders were allocated. A bare path said the function ran; `students`
+    is what tells an empty allocation from a real one.
+    """
+
+    #: The workbook written.
+    path: pl.Path
+    #: How many students it allocates.
+    students: int
+
+    def __str__(self) -> str:
+        return f"{self.path.name}: {self.students} students allocated"
+
+
 def save_distributed_graders(
     d: pd.DataFrame,
     folder: pl.Path,
     overwrite: bool = False,
     filename: str = DISTRIBUTED_FILENAME,
-) -> pl.Path:
+) -> Allocation:
     """
     Save the whole allocation to one Excel sheet.
 
@@ -55,4 +73,4 @@ def save_distributed_graders(
     # index=False on every path. The old overwrite branch omitted it and
     # added a phantom index column to the replaced file.
     d.to_excel(target, index=False)
-    return target
+    return Allocation(path=target, students=len(d))

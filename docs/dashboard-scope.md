@@ -21,10 +21,12 @@ was true once.
 | read the class list | `import_brightspace_classlist` | frame |
 | allocate graders | `assign_graders_individual` / `_groups` | frame |
 | write grader workbooks | `save_grader_sheets` | dict of paths |
+| save the allocation | `save_distributed_graders` | **`Allocation`** |
 | distribute feedback sheets | `distribute_feedback_sheets` | **`Distribution`** |
 | alphabetise / rename back | `alphabetise_folders`, `brightspace_name_folders` | `None` / paths |
 | read marks off the sheets | `catch_grades` | frame |
 | collate the grader files | `ingest_completed_graderfiles` | frame |
+| write the collated file | `save_collated_grades` | **`Collation`** |
 | collect quiz marks | `collect_quiz_marks` | frame |
 | collate the module | `collate_module_marks` | frame |
 | total and band | `prepare_data_for_departmental_template` | frame |
@@ -94,10 +96,9 @@ by one question: **can the code honestly know?**
 
 So the app's buttons are already enumerated: three of them.
 
-`graders_allocated` and `grades_collected` are still set by hand, because
-`save_distributed_graders` returns a path and `catch_grades` a frame and
-neither says whether the step finished. Giving them evidence-carrying returns
-is a small library slice, best done before the app leans on those two flags.
+Every assessment flag but `moderated` now comes from an artefact, so the app
+does not have to set any of them itself — it calls the step and passes the
+result to `record()`.
 
 ---
 
@@ -154,7 +155,7 @@ a new config file and that deserves an argument, not an assumption.
   see the bare-LF finding in **The SI upload** for how that bites.
 - **`import pathlib as pl`, `import polars as pr`.** House convention, and it
   inverts the usual polars idiom.
-- **`uv run pytest -q` is 494 passed, 1 skipped, 1 xfailed** on Linux; 495
+- **`uv run pytest -q` is 496 passed, 1 skipped, 1 xfailed** on Linux; 497
   passed with a real Excel. Green before and after.
 - **The notebook is run by the suite** (`tests/test_walkthrough.py`). Anything
   that breaks it fails there rather than in front of a colleague. If the app

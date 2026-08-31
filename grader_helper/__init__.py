@@ -21,7 +21,11 @@ from .models import (
 # ingesting
 from .ingesting.load_graders import load_graders
 from .ingesting.import_brightspace_classlist import import_brightspace_classlist
-from .ingesting.ingest_completed_graderfiles import ingest_completed_graderfiles
+from .ingesting.ingest_completed_graderfiles import (
+    Collation,
+    ingest_completed_graderfiles,
+    save_collated_grades,
+)
 from .ingesting.collect_quiz_marks import (
     DuplicateAttemptError,
     collect_quiz_marks,
@@ -73,7 +77,10 @@ from .moderation import (
 from .file_operations.distribute_feedback_sheets import distribute_feedback_sheets
 from .file_operations.distribute_feedback_sheets import distribute_feedback_sheets_groups
 from .file_operations.alphabetise_folders import alphabetise_folders
-from .file_operations.save_distributed_graders import save_distributed_graders
+from .file_operations.save_distributed_graders import (
+    Allocation,
+    save_distributed_graders,
+)
 from .file_operations.save_grader_sheets import save_grader_sheets
 from .file_operations.extract_studentid_grade import extract_studentid_grade
 from .file_operations.catch_grades import catch_grades
@@ -103,6 +110,9 @@ __all__ = [
     "assign_graders_groups",
     "import_brightspace_classlist",
     "alphabetise_folders",
+    "Allocation",
+    "Collation",
+    "save_collated_grades",
     "save_distributed_graders",
     "save_grader_sheets",
     "ingest_completed_graderfiles",
