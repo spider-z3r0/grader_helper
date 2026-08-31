@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 520 tests on Linux and 521 with a real Excel:
+Done, 540 tests on Linux and 541 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -310,6 +310,11 @@ Done, 520 tests on Linux and 521 with a real Excel:
 - `inspect_module_folder` and the **module dashboard**: point the tool at a
   folder and it loads the module there or offers to set one up -- see
   **Pointing at a folder**
+- The dashboard runs a coursework end to end: resolve resubmissions,
+  allocate, distribute, collect and reconcile, rename back -- and collects a
+  term of quizzes. See **Running an assessment from the app**
+- `reconcile_marks` and `resolve_multiple_subs`: two steps that existed only
+  as notebook code, one of which was subtly wrong
 
 ### The rewire onto `Module`
 
@@ -473,6 +478,71 @@ fields into the file anyway (1), and counting a quiz as not ready to mark
 Not done here: the dashboard shows a module and sets one up, but does not
 yet run a step against it. That is the next chunk.
 
+### Running an assessment from the app
+
+The dashboard's steps are functions, not code inside a button guard, and that
+is the load-bearing decision. A test cannot click, so a step written into a
+guard can only be checked by reading it. Written as
+`allocate_marking(assessment, class_list, replace=False)` and friends, the
+suite drives a whole module through exactly what a click calls --
+`tests/test_dashboard_steps.py` runs a coursework from allocation to renamed
+folders against a real module on disk, and the quizzes after it.
+
+The order the page offers, which is the order the work happens in:
+
+| | step | what it leaves behind |
+|---|---|---|
+| 1 | allocate the marking | `distributed.xlsx`, a workbook per grader |
+| 1a | resolve multiple submissions | one folder per student |
+| 2 | distribute the feedback sheets | a sheet in every folder, folders renamed |
+| | *the graders mark* | |
+| 3 | collect and reconcile | `completed_grades.xlsx`, the audit |
+| 4 | rename the folders back | Brightspace's own names |
+| — | collect the quiz marks | one column, for a collected assessment |
+
+Three things driving a real module surfaced, none of them in the page:
+
+**Resubmissions block everything, and resolving them deletes work.**
+`alphabetise_folders` refuses while a student has two folders -- both cannot
+become `SURNAME, NAME(id)` -- so nothing downstream runs until one goes.
+That step existed only in the walkthrough, where it sorted the folder *names*
+and kept the first. As text `01 April` sorts before `05 March`, so "keep the
+earliest" kept the April submission: the wrong one, silently, and only for
+students who straddle a month. `resolve_multiple_subs` orders by the
+timestamp instead, has **no default** for which attempt counts -- that is an
+academic judgement, not ours -- and works out what it would delete without
+touching anything, so the page can show it first. The walkthrough now calls
+it rather than keeping its own copy.
+
+**The reconciliation was notebook-only too.** `reconcile_marks` is the audit
+over the manual copy between the feedback sheet and the grader's own sheet.
+It separates the three kinds rather than counting them, because a student who
+never submitted reaches the collated file with no sheet to read *every time*,
+and a check that reports that as a disagreement stops being read. Two blanks
+are not a disagreement either: nobody marked that student, and the records
+agree about it. `not_submitted`, `not_allocated` and `transcription_slips` are
+the three, and only the last is the failure the audit exists for.
+
+**A withheld flag has to be visible.** `record` refuses to set
+`sheets_distributed` when a folder was left unrecognised -- a run that matched
+every student but one has not finished. The page said "Distributed" anyway.
+It now reports the flag rather than the click, and when it is withheld says
+which folders caused it and that anything not a student submission
+(`__MACOSX` from unzipping on a Mac, a folder the leader added) can be moved
+out. The end-to-end test asserts the flag is withheld while `__MACOSX` is
+there and set once it is gone.
+
+Two smaller ones: pressing **distribute** twice is an ordinary thing to do,
+and used to fail with "no Brightspace-style folders found" because the first
+press had renamed them -- it now only renames what is still in Brightspace
+format. And a feedback sheet is **never** replaced, with no tick that changes
+it: an existing sheet may carry a mark. The tick covers only the allocation
+and the grader workbooks, which nothing but this tool writes.
+
+Not done: the module-level half. Collating, the departmental sheet, the
+moderation pack and the SI upload all work in the library and are not yet
+behind buttons.
+
 ### Next
 
 The route to a module a leader can run end to end, in order. Each step
@@ -497,10 +567,10 @@ assumes the one before it works.
    chooses how many pieces of assessment and fills in the two numbers for
    each, rather than hand-editing `module.toml`. See **Pointing at a
    folder**.
-6. **Marimo dashboard** — the front door is built and the steps are not.
-   `notebooks/module_dashboard.py` opens a module folder or sets one up and
-   shows what is there; running a step from it is the next chunk, and
-   **that** is where the scratch copy has to be designed. **Scope and open
+6. **Marimo dashboard** — a coursework runs from it end to end, and the
+   quizzes with it. See **Running an assessment from the app**. What is left
+   is the module-level half: collate, departmental sheet, moderation pack,
+   SI upload, and the three manual flags. **Scope and open
    questions are in `docs/dashboard-scope.md`**; start a session on the app
    there rather than here. Two things were already decided there — it works
    on a scratch copy and promotes to the real module folder, and it is built

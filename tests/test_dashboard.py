@@ -271,8 +271,9 @@ def test_the_module_page_has_its_sections(run_dashboard, tmp_path):
 
     page = run_dashboard(folder).page
 
-    headings = re.findall(r"<h[23][^>]*>(.*?)</h[23]>", page)
-    assert headings == [
+    # Sliced, because the summary is the first thing rendered after the
+    # folder report and the step sections below add headings of their own.
+    expected = [
         "PS4034 — Research Methods",
         "Assessment",
         "Marking setup",
@@ -280,6 +281,9 @@ def test_the_module_page_has_its_sections(run_dashboard, tmp_path):
         "Produced once for the module",
         "Files",
     ]
+    headings = re.findall(r"<h[23][^>]*>(.*?)</h[23]>", page)
+
+    assert headings[: len(expected)] == expected
 
 
 def test_written_is_shown_apart_from_sent(run_dashboard, tmp_path):

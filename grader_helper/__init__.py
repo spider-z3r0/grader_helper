@@ -85,6 +85,11 @@ from .file_operations.save_grader_sheets import save_grader_sheets
 from .file_operations.extract_studentid_grade import extract_studentid_grade
 from .file_operations.catch_grades import catch_grades
 from .file_operations.brightspace_name_folders import brightspace_name_folders
+from .file_operations.resolve_multiple_subs import (
+    KEEP_CHOICES,
+    resolve_multiple_subs,
+)
+from .reconciling import Reconciliation, reconcile_marks
 from .file_operations.scan_multiple_submissions import make_sub_date, scan_multiple_subs
 from .file_operations.departmental_layout import DepartmentalLayout
 from .file_operations.build_departmental_sheet import build_departmental_sheet
@@ -143,6 +148,10 @@ __all__ = [
     "student_id_from_key",
     "write_si_marks",
     "brightspace_name_folders",
+    "KEEP_CHOICES",
+    "resolve_multiple_subs",
+    "Reconciliation",
+    "reconcile_marks",
     "make_sub_date",
     "scan_multiple_subs",
     "find_unsubmitted",

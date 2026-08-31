@@ -8,6 +8,29 @@ with app.setup():
 
     import marimo as mo
 
+    import pandas as pd
+
+    from grader_helper import (
+        KEEP_CHOICES,
+        alphabetise_folders,
+        assign_graders_groups,
+        assign_graders_individual,
+        brightspace_name_folders,
+        catch_grades,
+        collect_quiz_marks,
+        distribute_feedback_sheets,
+        import_brightspace_classlist,
+        ingest_completed_graderfiles,
+        reconcile_marks,
+        resolve_multiple_subs,
+        save_collated_grades,
+        save_distributed_graders,
+        save_grader_sheets,
+        scan_multiple_subs,
+    )
+    from grader_helper.file_operations.scan_multiple_submissions import (
+        parse_brightspace_folder,
+    )
     from grader_helper.models import (
         COLLECTED_TYPES,
         MODULE_FILENAME,
@@ -579,6 +602,666 @@ def write_the_module(
             )
 
     outcome
+    return
+
+
+@app.cell
+def marking_intro(loaded):
+    _intro = mo.md(
+        """
+        ---
+
+        # Running the assessment
+
+        Each button below is one step, and each writes into the module folder
+        you chose. They are grouped the way the work actually happens: two
+        before anyone marks, two after — with days or weeks in between, which
+        is why this is a page you come back to rather than a script you run.
+
+        Nothing here overwrites a feedback sheet. A sheet already in a
+        student's folder may carry a mark, so distribution skips it rather
+        than replacing it, and there is no tick that changes that. The tick
+        below covers only the files this tool writes for itself — the
+        allocation and the grader workbooks — which are safe to regenerate
+        because nothing but this tool puts anything in them.
+
+        After a step, click **Re-read this folder** at the top to see the
+        status it recorded.
+        """
+    )
+    _intro if loaded else mo.md("")
+    return
+
+
+@app.cell
+def helpers():
+    def attempt(action):
+        """Run one step. Return its result, or the exception it raised.
+
+        Every button needs this and none of them may crash the page: a step
+        that fails on a real module folder — a workbook open in Excel, a
+        grader who has not returned their file — has to leave a message
+        behind, not a traceback that takes the rest of the page with it.
+        """
+        try:
+            return action(), None
+        except Exception as exc:
+            return None, exc
+
+    def failed(title: str, error: Exception):
+        return mo.md(
+            f"""
+            ### {title} — not done
+
+            ```
+            {type(error).__name__}: {error}
+            ```
+            """
+        )
+
+    return attempt, failed
+
+
+@app.cell
+def the_class_list(found, loaded):
+    def _read(module):
+        path = module.classlist_path
+        if path is None:
+            return None, "No class list set. Add `classlist` to `[paths]`."
+        if not path.exists():
+            return None, f"No class list at `{path}`."
+        # Groups have to be asked for at ingest: a group allocation needs the
+        # column, and it is dropped when it is not wanted.
+        grouped = any(a.group for a in module.assessments)
+        try:
+            frame = import_brightspace_classlist(path, group=grouped)
+        except Exception as exc:
+            return None, f"`{path.name}` would not read: `{exc}`"
+        return frame, (
+            f"**{len(frame)} students** on the class list"
+            + (" (with groups)" if grouped else "")
+        )
+
+    class_list, class_list_note = _read(found.module) if loaded else (None, "")
+
+    mo.md(class_list_note) if loaded else mo.md("")
+    return (class_list,)
+
+
+@app.cell
+def pick_an_assessment(found, loaded):
+    ids = [a.id for a in found.module.assessments] if loaded else []
+    which = mo.ui.dropdown(
+        options=ids, value=ids[0] if ids else None, label="**Working on**"
+    )
+
+    which if loaded else mo.md("")
+    return (which,)
+
+
+@app.cell
+def the_chosen_assessment(found, loaded, which):
+    def _describe(assessment, repeats):
+        subs = assessment.submissions_path
+        folders = (
+            sorted(p for p in subs.iterdir() if p.is_dir()) if subs.is_dir() else []
+        )
+        # Folder names only, so this is cheap even on a real cohort.
+        status = assessment.status
+
+        return mo.md(
+            "\n".join(
+                [
+                    f"### {assessment.name} (`{assessment.id}`)",
+                    "",
+                    f"Marked out of {assessment.marks_out_of}, worth "
+                    f"{assessment.weight}.",
+                    "",
+                    "| | |",
+                    "|---|---|",
+                    f"| submissions | `{subs}` |",
+                    f"| folders there | {len(folders)} |",
+                    f"| submitted more than once | {len(repeats)} |",
+                    f"| graders | "
+                    f"{', '.join(g.initials for g in assessment.graders) or '—'} |",
+                    f"| blank feedback sheet | "
+                    f"{'`' + assessment.rubric + '`' if assessment.rubric else '—'}"
+                    f"{'' if assessment.rubric_path is None or assessment.rubric_path.exists() else ' — **not on disk**'} |",
+                    f"| mark is in | `{assessment.grade_cell or '—'}` |",
+                    "",
+                    f"Allocated: **{'yes' if status.graders_allocated else 'no'}** · "
+                    f"distributed: **{'yes' if status.sheets_distributed else 'no'}** · "
+                    f"collected: **{'yes' if status.grades_collected else 'no'}**",
+                ]
+            )
+        )
+
+    chosen = (
+        found.module.assessment(which.value) if loaded and which.value else None
+    )
+    # Folder names only, so this is cheap even on a real cohort. Worked out
+    # once here rather than per step: three cells below need to know.
+    repeats = (
+        scan_multiple_subs(chosen.submissions_path)
+        if chosen is not None and chosen.submissions_path.is_dir()
+        else {}
+    )
+    # An assessment collected from Brightspace's exports takes a different
+    # path entirely: no allocation, no sheets, no transcription, so nothing
+    # to reconcile. The tick in the setup form is what says which it is.
+    collected = chosen is not None and chosen.pass_mark is not None
+
+    _describe(chosen, repeats) if chosen is not None else mo.md("")
+    return chosen, collected, repeats
+
+
+@app.cell
+def step_options(loaded):
+    replace = mo.ui.checkbox(
+        value=False,
+        label="replace the allocation and grader workbooks if they exist "
+        "(never feedback sheets)",
+    )
+
+    replace if loaded else mo.md("")
+    return (replace,)
+
+
+@app.cell
+def why_not(chosen, collected, class_list, repeats):
+    def blocking(*needs: str) -> list[str]:
+        """What is missing before a step can run, in words."""
+        if chosen is None:
+            return ["no assessment chosen"]
+        if collected:
+            return ["nobody marks this one — it is collected from Brightspace"]
+        reasons = {
+            "class list": "the class list has not been read",
+            "graders": "this assessment has no graders in module.toml",
+            "rubric": "this assessment has no blank feedback sheet in module.toml",
+            "grade cell": "this assessment has no mark cell in module.toml",
+            "submissions": f"there is no submissions folder at "
+            f"`{chosen.submissions_path}`",
+            "one folder each": (
+                f"{len(repeats)} student(s) submitted more than once — "
+                "resolve that first, below"
+            ),
+        }
+        have = {
+            "class list": class_list is not None,
+            "graders": bool(chosen.graders),
+            "rubric": bool(chosen.rubric),
+            "grade cell": bool(chosen.grade_cell),
+            "submissions": chosen.submissions_path.is_dir(),
+            "one folder each": not repeats,
+        }
+        return [reasons[need] for need in needs if not have[need]]
+
+    def step_panel(title: str, explanation: str, button, blocked: list[str]):
+        """A step, or the reason it cannot run yet."""
+        if blocked:
+            return mo.md(
+                f"### {title}\n\n*Not yet — " + "; ".join(blocked) + ".*"
+            )
+        return mo.vstack([mo.md(f"### {title}\n\n{explanation}"), button])
+
+    return blocking, step_panel
+
+
+@app.cell
+def the_steps(found):
+    """What each button does, as a function that can be called without one.
+
+    The work is here rather than inside the button guards so that it can be
+    driven by something other than a click -- the suite runs a whole module
+    through these against a real folder on disk, which a test that can only
+    press buttons cannot do.
+
+    Each takes the assessment it works on. The module handle comes from the
+    page, because it is the file every one of these records into.
+    """
+
+    def allocate_marking(assessment, class_list, replace: bool = False):
+        graders = [g.initials for g in assessment.graders]
+        assign = (
+            assign_graders_groups if assessment.group else assign_graders_individual
+        )
+        # This overwrite is the grader column in the frame, not a file.
+        allocation = assign(class_list, graders, overwrite=True)
+        master = save_distributed_graders(
+            allocation, assessment.folder_path, overwrite=replace
+        )
+        workbooks = save_grader_sheets(
+            allocation,
+            assessment.grading_output_path,
+            graders,
+            criteria=["Mark"],
+            overwrite=replace,
+        )
+        # The artefact is the evidence, not the absence of an exception.
+        found.file.record(master, assessment.id)
+        return master, workbooks, allocation
+
+    def distribute_sheets(assessment, class_list):
+        # Never overwrite: a sheet already in a student's folder may carry a
+        # mark, and there is no tick that changes that.
+        distribution = distribute_feedback_sheets(
+            assessment.submissions_path, assessment.rubric_path
+        )
+
+        # Only rename what is still in Brightspace's format. Pressing this a
+        # second time is an ordinary thing to do -- a late submission
+        # downloaded and dropped in, or simply not being sure it ran -- and
+        # alphabetise_folders refuses a folder with nothing left to rename,
+        # which would read as the step having failed when it has already
+        # succeeded.
+        log_path = assessment.submissions_path / "folder_rename_log.csv"
+        still_brightspace = any(
+            parse_brightspace_folder(folder.name)
+            for folder in assessment.submissions_path.iterdir()
+            if folder.is_dir()
+        )
+        if still_brightspace:
+            # Returns None. The handoff to the rename-back step is the log.
+            alphabetise_folders(class_list, assessment.submissions_path)
+
+        log = pd.read_csv(log_path) if log_path.exists() else pd.DataFrame()
+        found.file.record(distribution, assessment.id)
+        return distribution, log
+
+    def collect_marks(assessment, replace: bool = False):
+        graders = [g.initials for g in assessment.graders]
+        received = catch_grades(assessment.submissions_path, assessment.grade_cell)
+        reported = ingest_completed_graderfiles(
+            assessment.grading_output_path, graders, file_type="excel"
+        )
+        collation = save_collated_grades(
+            reported,
+            assessment.grading_output_path,
+            file_type="excel",
+            overwrite=replace,
+        )
+        found.file.record(collation, assessment.id)
+        return collation, reconcile_marks(received, reported)
+
+    def rename_back(assessment):
+        log_path = assessment.submissions_path / "folder_rename_log.csv"
+        if not log_path.exists():
+            raise FileNotFoundError(
+                f"No folder_rename_log.csv in {assessment.submissions_path}. "
+                "The folders are renamed back from that log, which the "
+                "distribute step writes, so there is nothing to restore them "
+                "from."
+            )
+        return brightspace_name_folders(
+            pd.read_csv(log_path), assessment.submissions_path
+        )
+
+    def recorded(assessment, flag: str) -> bool:
+        """Whether a step's flag actually got set.
+
+        `record` reads the evidence off what a step returned and leaves the
+        status alone when it does not hold up -- a distribution that left a
+        folder unrecognised has not finished, and the tick would hide the
+        one it missed. So the page reports the flag rather than the click.
+        """
+        return getattr(
+            found.file.module.assessment(assessment.id).status, flag
+        )
+
+    def resolve_resubmissions(assessment, keep: str, apply: bool = False):
+        # apply=False works out the same answer without touching anything, so
+        # the choice can be seen before a student's work is deleted.
+        return resolve_multiple_subs(
+            assessment.submissions_path, keep=keep, apply=apply
+        )
+
+    def collect_quizzes(assessment, class_list):
+        marks = collect_quiz_marks(assessment, class_list)
+        # No evidence type for a frame, so this flag is set directly rather
+        # than through record(). What a frame would have to show to justify it
+        # is a question for the library, not for a button.
+        found.file.set_status(assessment.id, grades_collected=True)
+        return marks
+
+    return (
+        allocate_marking,
+        collect_marks,
+        recorded,
+        collect_quizzes,
+        distribute_sheets,
+        rename_back,
+        resolve_resubmissions,
+    )
+
+
+@app.cell
+def allocate_button(blocking, step_panel, chosen):
+    allocate = mo.ui.run_button(label="Allocate the marking", kind="warn")
+
+    step_panel(
+        "1. Allocate the marking",
+        "Splits the class list between the graders, writes `distributed.xlsx` "
+        "at the assessment root, and gives each grader their own workbook in "
+        "`grading_output/`. The split is random and even.",
+        allocate,
+        blocking("class list", "graders"),
+    ) if chosen is not None else mo.md("")
+    return (allocate,)
+
+
+@app.cell
+def do_allocate(
+    allocate, allocate_marking, attempt, failed, chosen, class_list, recorded,
+    replace,
+):
+    if not (allocate.value and chosen is not None):
+        allocated = mo.md("")
+    else:
+        _done, _error = attempt(
+            lambda: allocate_marking(chosen, class_list, replace.value)
+        )
+        if _error is not None:
+            allocated = failed("Allocation", _error)
+        else:
+            _master, _workbooks, _allocation = _done
+            allocated = mo.md(
+                f"""
+                ### Allocated
+
+                {_master}
+
+                Per grader: `{_allocation["grader"].value_counts().to_dict()}`
+
+                Workbooks in `grading_output/`:
+                `{[p.name for p in _workbooks.values()]}`
+
+                Recorded `graders_allocated`:
+                **{"yes" if recorded(chosen, "graders_allocated") else "no"}**
+                """
+            )
+
+    allocated
+    return
+
+
+@app.cell
+def resubmission_widgets():
+    # Defined apart from the panel that renders them: marimo refuses to let a
+    # cell read the value of an element it created itself, and the panel has
+    # to read the choice to work out what deleting it would remove.
+    keep_which = mo.ui.radio(
+        options=list(KEEP_CHOICES),
+        value=None,
+        label="**Which submission counts?**",
+    )
+    resolve = mo.ui.run_button(label="Delete the other submissions", kind="danger")
+    return keep_which, resolve
+
+
+@app.cell
+def resubmission_panel(
+    chosen, collected, repeats, resolve_resubmissions, keep_which, resolve
+):
+    def _panel():
+        listed = "\n".join(
+            f"| `{student}` | "
+            + " · ".join(when.strftime("%d %b %Y %H:%M") for when in sorted(times))
+            + " |"
+            for student, times in sorted(repeats.items())
+        )
+        heading = mo.md(
+            f"""
+            ### 1a. Resolve multiple submissions
+
+            {len(repeats)} student(s) submitted more than once. Two folders
+            for one student cannot both be renamed for marking, so nothing
+            below will run until one of them goes.
+
+            | student | submitted |
+            |---|---|
+            {listed}
+
+            Which one counts is your decision, not the tool's: a
+            resubmission may supersede the first attempt, or may have arrived
+            after the deadline and not count at all. There is no default.
+            """
+        )
+        if keep_which.value is None:
+            return mo.vstack([heading, keep_which])
+
+        plan = resolve_resubmissions(chosen, keep_which.value)
+        return mo.vstack(
+            [
+                heading,
+                keep_which,
+                mo.md(
+                    "**This will delete:**\n\n"
+                    + "\n".join(f"- `{folder.name}`" for folder in plan.removed)
+                    + "\n\nBrightspace still has them; this folder will not."
+                ),
+                resolve,
+            ]
+        )
+
+    _panel() if (chosen is not None and repeats and not collected) else mo.md("")
+    return
+
+
+@app.cell
+def do_resolve(resolve, keep_which, resolve_resubmissions, attempt, failed, chosen):
+    if not (resolve.value and chosen is not None and keep_which.value):
+        resolved = mo.md("")
+    else:
+        _done, _error = attempt(
+            lambda: resolve_resubmissions(chosen, keep_which.value, apply=True)
+        )
+        resolved = (
+            failed("Resolving the resubmissions", _error)
+            if _error is not None
+            else mo.md(
+                f"### Resolved\n\n{_done}\n\nClick **Re-read this folder** "
+                "at the top, then carry on."
+            )
+        )
+
+    resolved
+    return
+
+
+@app.cell
+def distribute_button(blocking, step_panel, chosen):
+    distribute = mo.ui.run_button(label="Distribute the feedback sheets", kind="warn")
+
+    step_panel(
+        "2. Distribute the feedback sheets",
+        "Copies the blank sheet into every student's folder, named for their "
+        "id, then renames the folders from Brightspace's format into "
+        "`SURNAME, NAME(id)` for marking. A sheet already there is skipped, "
+        "never replaced — it may already carry a mark.",
+        distribute,
+        blocking("class list", "rubric", "submissions", "one folder each"),
+    ) if chosen is not None else mo.md("")
+    return (distribute,)
+
+
+@app.cell
+def do_distribute(
+    distribute, distribute_sheets, attempt, failed, chosen, class_list, recorded
+):
+    if not (distribute.value and chosen is not None):
+        distributed = mo.md("")
+    else:
+        _done, _error = attempt(lambda: distribute_sheets(chosen, class_list))
+        if _error is not None:
+            distributed = failed("Distribution", _error)
+        else:
+            _distribution, _log = _done
+            _flag = recorded(chosen, "sheets_distributed")
+            distributed = mo.md(
+                f"""
+                ### Distributed
+
+                {_distribution}
+
+                {len(_log)} folders renamed for marking; the log that renames
+                them back is in the submissions folder.
+
+                Recorded `sheets_distributed`: **{"yes" if _flag else "no"}**
+
+                {"" if _flag else
+                 "Not recorded, because these folders were not recognised: "
+                 f"`{_distribution.unmatched}`. A run that matched every "
+                 "student but one has not finished, and a tick here would "
+                 "hide the one it missed. Anything that is not a student "
+                 "submission — `__MACOSX` from unzipping on a Mac, a folder "
+                 "you added — can be deleted or moved out; anything that is "
+                 "one needs looking at."}
+                """
+            )
+
+    distributed
+    return
+
+
+@app.cell
+def collect_button(blocking, step_panel, chosen):
+    collect = mo.ui.run_button(label="Collect and reconcile the marks", kind="warn")
+
+    step_panel(
+        "3. Collect the marks — after the graders have finished",
+        "Reads the mark off every feedback sheet, collates the graders' own "
+        "sheets into `completed_grades.xlsx`, and compares the two. Between "
+        "them sits a human copying a number by hand, and this is the check "
+        "that they agree.",
+        collect,
+        blocking("graders", "grade cell", "submissions"),
+    ) if chosen is not None else mo.md("")
+    return (collect,)
+
+
+@app.cell
+def do_collect(collect, collect_marks, attempt, failed, chosen, recorded, replace):
+    if not (collect.value and chosen is not None):
+        collected_marks = mo.md("")
+    else:
+        _done, _error = attempt(lambda: collect_marks(chosen, replace.value))
+        if _error is not None:
+            collected_marks = failed("Collecting the marks", _error)
+        else:
+            _collation, _audit = _done
+            collected_marks = mo.vstack(
+                [
+                    mo.md(
+                        f"### Collected\n\n{_collation}\n\n**{_audit}**\n\n"
+                        f"Recorded `grades_collected`: "
+                        f"**{'yes' if recorded(chosen, 'grades_collected') else 'no'}**"
+                    ),
+                    mo.md("")
+                    if _audit.agree
+                    else mo.vstack(
+                        [
+                            mo.md(
+                                "Look at these before sending anything to the "
+                                "department. A student collated without a "
+                                "feedback sheet usually just never submitted; "
+                                "two differing marks is a slip at the copy."
+                            ),
+                            _audit.disagreements,
+                        ]
+                    ),
+                ]
+            )
+
+    collected_marks
+    return
+
+
+@app.cell
+def rename_button(blocking, step_panel, chosen):
+    rename = mo.ui.run_button(label="Rename the folders back", kind="warn")
+
+    step_panel(
+        "4. Rename the folders for re-upload",
+        "Puts every folder back to the exact name Brightspace gave it, using "
+        "the log written at step 2, so the marked folders can go back up.",
+        rename,
+        blocking("submissions"),
+    ) if chosen is not None else mo.md("")
+    return (rename,)
+
+
+@app.cell
+def do_rename(rename, rename_back, attempt, failed, chosen):
+    if not (rename.value and chosen is not None):
+        renamed = mo.md("")
+    else:
+        _done, _error = attempt(lambda: rename_back(chosen))
+        renamed = (
+            failed("Renaming the folders", _error)
+            if _error is not None
+            else mo.md(f"### Renamed\n\n{_done}")
+        )
+
+    renamed
+    return
+
+
+@app.cell
+def quiz_button(chosen, collected, class_list):
+    quizzes = mo.ui.run_button(label="Collect the quiz marks", kind="warn")
+
+    _panel = (
+        mo.vstack(
+            [
+                mo.md(
+                    "### Collect the quiz marks\n\nFolds every Brightspace "
+                    "export in the submissions folder into one mark, counting "
+                    "the passes against this assessment's own pass mark and "
+                    "free passes. The only step there is — nobody marks a quiz."
+                ),
+                quizzes,
+            ]
+        )
+        if collected and class_list is not None
+        else mo.md("")
+    )
+
+    _panel if chosen is not None else mo.md("")
+    return (quizzes,)
+
+
+@app.cell
+def do_quizzes(
+    quizzes, collect_quizzes, attempt, failed, chosen, collected, class_list
+):
+    if not (quizzes.value and collected and class_list is not None):
+        quiz_marks = mo.md("")
+    else:
+        _done, _error = attempt(lambda: collect_quizzes(chosen, class_list))
+        if _error is not None:
+            quiz_marks = failed("Collecting the quiz marks", _error)
+        else:
+            _counts = _done[chosen.raw_column].value_counts().sort_index().to_dict()
+            quiz_marks = mo.vstack(
+                [
+                    mo.md(
+                        f"""
+                        ### Quiz marks collected
+
+                        **{len(_done)} students**, every one on the class list,
+                        including those in no export at all — a missing row
+                        would take a component out of a module total, and a
+                        total missing a component is still a plausible number.
+
+                        Distribution of `{chosen.raw_column}`: `{_counts}`
+                        """
+                    ),
+                    _done,
+                ]
+            )
+
+    quiz_marks
     return
 
 

@@ -31,6 +31,7 @@ with app.setup():
         import_brightspace_classlist,
         ingest_completed_graderfiles,
         prepare_data_for_departmental_template,
+        resolve_multiple_subs,
         read_quiz,
         save_distributed_graders,
         flag_borderline,
@@ -194,24 +195,23 @@ def cw1_check_for_resubmissions(A):
 
 @app.cell
 def cw1_resolve_resubmissions(A, repeated):
-    # Keeps the EARLIEST submission for each repeat. Change to [:-1] to keep
-    # the latest instead. Delete this cell entirely once you would rather
-    # resolve them by hand.
-    for student_id in repeated:
-        folders = sorted(
-            p for p in A.submissions_path.iterdir()
-            if p.is_dir() and student_id in p.name
-        )
-        for extra in folders[1:]:
-            for f in extra.rglob("*"):
-                if f.is_file():
-                    f.unlink()
-            for d in sorted(extra.rglob("*"), reverse=True):
-                d.rmdir()
-            extra.rmdir()
+    # `keep` has no default: whether a resubmission supersedes the first
+    # attempt or arrived after the deadline is the module's rule, not this
+    # package's. Change it to "latest" for a module whose rule is the other
+    # one, and delete this cell entirely once you would rather resolve them
+    # by hand.
+    #
+    # It orders by the timestamp in the folder name, never by the name. As
+    # text, "01 April" sorts before "05 March", so keeping the first folder
+    # alphabetically keeps the April submission -- the wrong one, silently,
+    # and only for the students who happen to straddle a month.
+    #
+    # apply=False first would show what it is about to delete without
+    # touching anything.
+    resolution = resolve_multiple_subs(A.submissions_path, keep="earliest", apply=True)
 
     resolved = scan_multiple_subs(A.submissions_path)
-    mo.md(f"Remaining resubmissions: `{sorted(resolved)}`")
+    mo.md(f"{resolution}. Remaining resubmissions: `{sorted(resolved)}`")
     return
 
 
