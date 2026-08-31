@@ -48,6 +48,7 @@ should show the import line.
 | the Excel read/write functions | **The Excel round trip** |
 | writing the departmental sheet | **Building the departmental sheet** |
 | moderation samples, borderline | **Moderation packs** |
+| the SI upload file | **The SI upload** |
 | quizzes, pass marks, free passes | **Quiz collection** |
 | what to build next | **Next** |
 | something looks broken | **Known gaps** — it may be known |

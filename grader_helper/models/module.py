@@ -38,6 +38,9 @@ class ModulePaths(BaseModel):
     assessments: str = "assessments"
     classlist: str | None = None
     departmental_sheet: str | None = None
+    #: The upload file the student information system issues, which we fill
+    #: two columns of and hand back. Named by SI, not by us.
+    si_file: str | None = None
 
 
 class Module(BaseModel):
@@ -179,6 +182,11 @@ class Module(BaseModel):
     @property
     def departmental_sheet_path(self) -> pl.Path | None:
         return self._resolve(self.paths.departmental_sheet)
+
+    @property
+    def si_file_path(self) -> pl.Path | None:
+        """SI's own upload file, if the module records one."""
+        return self._resolve(self.paths.si_file)
 
     # ------------------------------------------------------------- grade sheet
 

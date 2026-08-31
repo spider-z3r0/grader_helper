@@ -39,6 +39,7 @@ with app.setup():
         save_grader_sheets,
         scan_multiple_subs,
         write_departmental_sheet,
+        write_si_marks,
     )
     from grader_helper.file_operations.brightspace_name_folders import (
         brightspace_name_folders,
@@ -1388,6 +1389,129 @@ def moderation_a_pack_spanning_two_assessments(MODULE, module_sheet):
     """)
     return ps4001_pack, ps4001_sample
 
+
+@app.cell
+def si_intro():
+    mo.md(
+        """
+        # The SI upload
+
+        The last step. The student information system **issues** a file with
+        one row per enrolled student and three columns blank -- `Mark`,
+        `Grade`, and a `CD` nobody fills -- and you send the same file back.
+
+        So this is the departmental sheet's problem again: we fill in two
+        fields of somebody else's file and change nothing else. Not "produce
+        a file in SI's format".
+
+        Three quirks make that harder than it sounds, and all three are real:
+
+        | | |
+        |---|---|
+        | line endings | **bare LF**, on a file a Windows system produced |
+        | quoting | none, and no field holds a comma — `KEVIN O'MALLEY`, not `O'MALLEY, KEVIN` |
+        | `#` prefixes | on headers *and* values, and `#CD` holds `#07` |
+
+        The first is the one that bites. Python's `open(path, "w")` turns
+        `\n` into `\r\n` on Windows, so writing the file back the obvious
+        way changes **every line in it** — a function asked to change two
+        fields rewriting all forty. `write_si_marks` reads and writes bytes.
+
+        `#SPR_Code` is `#<student id>/<attempt>`, the attempt being how many
+        times they have taken the module. It is matched on and **never
+        rebuilt**: that number is SI's, and nothing we hold could reproduce
+        it.
+        """
+    )
+    return
+
+
+@app.cell
+def si_what_si_issued(MODULE):
+    # The fixture plays SI here. Nothing in the package generates one of
+    # these for real -- SI sends it, we fill it in and send it back.
+    issued = MODULE.si_file_path.read_bytes()
+
+    mo.md(f"""
+    `{MODULE.si_file_path.name}`, as issued:
+
+    ```
+    {issued.decode().splitlines()[0]}
+    {issued.decode().splitlines()[1]}
+    ```
+
+    | | |
+    |---|---|
+    | CRLF | `{b"\r\n" in issued}` |
+    | BOM | `{issued[:3] == b"\xef\xbb\xbf"}` |
+    | quotes | `{b'"' in issued}` |
+    | rows | `{len(issued.decode().splitlines()) - 1}` |
+    """)
+    return (issued,)
+
+
+@app.cell
+def si_fill_all_three_modules(
+    MODULE, MODULE_2, MODULE_3, module_sheet, module_2_sheet, module_3_sheet
+):
+    """MODULE LEADER -- one upload per module."""
+    si_results = [
+        write_si_marks(sheet, module.si_file_path, module.root / f"{module.code}_upload.CSV")
+        for module, sheet in (
+            (MODULE, module_sheet),
+            (MODULE_2, module_2_sheet),
+            (MODULE_3, module_3_sheet),
+        )
+    ]
+
+    mo.md("\n".join(f"- **{result}**" for result in si_results))
+    return (si_results,)
+
+
+@app.cell
+def si_what_changed(issued, si_results):
+    # The claim is that two fields moved and nothing else did. Rather than
+    # take that on trust, diff the bytes field by field.
+    #
+    # Every name here is prefixed: marimo requires each to be defined in
+    # exactly one cell across the whole notebook, and `headers` was already
+    # taken by the PS4002 section.
+    si_filled = si_results[0].path.read_bytes()
+    si_before = issued.decode().splitlines()
+    si_after = si_filled.decode().splitlines()
+
+    si_moved = sorted(
+        {
+            index
+            for was, now in zip(si_before[1:], si_after[1:])
+            for index, (a, b) in enumerate(zip(was.split(","), now.split(",")))
+            if a != b
+        }
+    )
+    si_headers = si_before[0].split(",")
+
+    mo.md(f"""
+    ```
+    was:  {si_before[1]}
+    now:  {si_after[1]}
+    ```
+
+    Fields that changed: **{[si_headers[i] for i in si_moved]}**
+
+    | | |
+    |---|---|
+    | line count unchanged | `{len(si_before) == len(si_after)}` |
+    | CRLF introduced | `{b"\r\n" in si_filled}` |
+    | header untouched | `{si_before[0] == si_after[0]}` |
+
+    Everything else — the `#` prefixes, `#07` with its leading zero, the
+    `/3` on a third attempt, the name — is copied through byte for byte.
+
+    **One thing nobody here can answer:** the non-participant goes up as
+    `Mark = 0`, `Grade = NG`. Whether SI accepts that letter is worth finding
+    out before a real upload rather than during one.
+    """)
+    return
 
 if __name__ == "__main__":
     app.run()

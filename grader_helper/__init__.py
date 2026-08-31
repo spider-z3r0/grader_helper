@@ -50,6 +50,14 @@ from .dataframe_operations.prepare_data_for_departmental_template import (
 # collating -- the assembly layer, above the packages it reaches into
 from .collating import collate_module_marks
 
+# the student information system upload
+from .si_upload import (
+    SiUpload,
+    read_si_file,
+    student_id_from_key,
+    write_si_marks,
+)
+
 # moderation
 from .moderation import (
     Pack,
@@ -117,6 +125,10 @@ __all__ = [
     "next_grade_up",
     "read_moderation_manifest",
     "sample_for_moderation",
+    "SiUpload",
+    "read_si_file",
+    "student_id_from_key",
+    "write_si_marks",
     "brightspace_name_folders",
     "make_sub_date",
     "scan_multiple_subs",

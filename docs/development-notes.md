@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 455 tests on Linux and 456 with a real Excel:
+Done, 477 tests on Linux and 478 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -395,8 +395,8 @@ assumes the one before it works.
    NG. See **Moderation packs**. The external pack is an assembly over the
    internal ones and is now possible, because each internal pack keeps its
    manifest.
-4. **Final marks for upload to SI** — whatever format the student
-   information system wants, which nothing in the package knows about yet.
+4. ~~**Final marks for upload to SI**~~ — done. SI issues the file and we
+   fill in two columns of it. See **The SI upload**.
 5. **Module initialisation as a workflow** — a module leader specifying
    paths, weightings and how many assessments, rather than hand-editing
    `module.toml`. `init_module` is the machinery; this is the front door to
@@ -873,6 +873,72 @@ assessment from the total, pointing N at a formula column, freezing the
 distribution on column I, skipping the clear, writing ids as numbers — and
 watching the test fail.
 
+### The SI upload
+
+SI **issues** a file — one row per enrolled student, `Mark`, `Grade` and a
+bare `CD` blank — and the module leader sends the same file back. So this is
+the departmental sheet's problem again: *fill in two fields of somebody
+else's file and change nothing else*, not *produce a file in SI's format*.
+
+`write_si_marks(df, si_file, destination=None)` does it;
+`paths.si_file` in `module.toml` records where SI's file is.
+
+Read off a real file at byte level (counts and the header only — no student
+data left the machine):
+
+| | |
+|---|---|
+| encoding | UTF-8, **no BOM**, trailing newline |
+| line endings | **bare LF**, zero CRLF — on a file Windows produced |
+| quoting | none anywhere; no field holds a comma |
+| columns (13) | `Year, Period, #Module, Occ, #Map, #Ass#, #SPR_Code, Name, #CD, Mark, Grade, CD, #Cand Key` |
+| `#SPR_Code` | `#<student id>/<attempt>` — attempt = times taken |
+| `Name` | `KEVIN O'MALLEY` — upper case, apostrophes, no surname comma |
+| `#CD` | two digits, leading zero significant (`#07`) |
+| `Mark` | an integer literal; `Grade` a band letter |
+
+**The bare LF is the one that bites.** Python's `open(path, "w")` turns `\n`
+into `\r\n` on Windows, so writing the file back the obvious way changes
+*every line in it* — forty lines rewritten by a function asked to change two
+fields. Bytes are read and written, with whatever terminator the file already
+had. Linux CI would never catch this by accident, because there a text write
+produces LF anyway, so the test asserts on bytes.
+
+`#SPR_Code` and `#Cand Key` are **matched on and never rebuilt**. The attempt
+number is SI's and nothing we hold could reproduce it, so a writer that
+reconstructed the key would get every resitting student wrong and nobody
+else.
+
+#### Two faults in the scratch version this replaces
+
+The working version was a marimo notebook doing `pr.scan_csv` →
+`write_csv`, which re-emits the file as polars thinks a CSV should look. Both
+faults are of the usual kind — a plausible result rather than an error:
+
+- **It blanked marks.** `with_columns(pr.col("Mark_right").alias("Mark"))`
+  replaced `Mark` unconditionally, so any SI row unmatched in the grades
+  frame got `Mark = null`. Harmless the first time, because the column is
+  empty anyway; on a re-run against a partial frame it overwrites real marks
+  with nothing. A student on SI's roll with no mark is now **refused** and
+  named, with `allow_unmarked=True` as the explicit way through.
+- **`how="full"` invented rows.** A student in the grades file but not in
+  SI's got appended with a null `#SPR_Code`. SI's roll decides the cohort, so
+  they are reported in `not_enrolled` and never added.
+
+Nine guards in `tests/test_si_upload.py`, each checked by reintroducing the
+bug: writing as text, blanking an unmatched mark, skipping the refusal,
+putting the id through an int, writing `70.0`, rebuilding the attempt number,
+accepting a quoted file, accepting a short row, and appending the
+un-enrolled.
+
+#### The fixture has to play SI
+
+Nothing generates one of these for real, so `write_si_export` in
+`tests/fake_module.py` writes the blank file SI would issue — LF endings, no
+BOM, the `#` prefixes, a `#CD` with a leading zero, and two students on
+second and third attempts. PS4001, PS4002 and PS4003 each get one, and the
+walkthrough fills all three.
+
 ### Moderation packs
 
 Who gets a second opinion, and the folders the second marker is handed.
@@ -1266,6 +1332,11 @@ Two things the walkthrough surfaced, neither a bug:
   moves the noise. It stops being cosmetic if stray `EXCEL.EXE` processes
   start accumulating; `app.kill()` after `quit()` and `add_book=False` are
   the things to try then.
+- **Nobody knows whether SI accepts `NG`.** A non-participant reaches the
+  upload as `Mark = 0`, `Grade = NG`, which is what the departmental sheet
+  says they got. If SI rejects that letter the cell needs something else, and
+  that is worth establishing before a real upload rather than during one. The
+  walkthrough prints it so it is at least visible.
 - A `.pyc` is tracked despite `.gitignore` listing `__pycache__/`. Ignore
   rules do not apply to already-tracked files: `git rm --cached` it.
 

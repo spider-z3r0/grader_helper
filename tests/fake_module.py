@@ -205,6 +205,77 @@ def third_module_marks() -> dict[str, dict[str, int]]:
     }
 
 
+#: The student information system's upload file, as SI issues it.
+#:
+#: Thirteen columns, `#` prefixes on headers *and* values, `#Ass#` with one at
+#: each end, and Mark/Grade/CD blank -- those are the three the module leader
+#: fills, and the bare `CD` is never filled by anyone.
+#:
+#: Read off a real file, and every detail matters to a writer that promises to
+#: change two fields and nothing else:
+#:
+#:   * **bare LF** line endings, on a file a Windows system produced. Writing
+#:     it back as text on Windows turns all of them into CRLF.
+#:   * no BOM, and a trailing newline.
+#:   * no quote characters anywhere, and no field holding a comma -- names are
+#:     upper case with no surname comma, so `KEVIN O'MALLEY` and not
+#:     `O'MALLEY, KEVIN`.
+SI_COLUMNS = (
+    "Year", "Period", "#Module", "Occ", "#Map", "#Ass#", "#SPR_Code",
+    "Name", "#CD", "Mark", "Grade", "CD", "#Cand Key",
+)
+
+#: How many times each student has taken the module. Almost everyone is on
+#: their first attempt; two are not, because the number goes into `#SPR_Code`
+#: and `#Cand Key` and cannot be derived from anything we hold -- a writer
+#: that rebuilt those keys instead of matching on them would get these wrong
+#: and nothing else.
+SI_ATTEMPTS = {"23304307": 2, "23304311": 3}
+
+#: The two-digit code SI carries in `#CD`. One of them starts with a zero,
+#: which is the point: `#07` through anything that treats it as a number
+#: comes back as `#7`.
+SI_CODES = ("37", "07", "70", "12")
+
+
+def write_si_export(path: pl.Path, code: str) -> pl.Path:
+    """Write the blank upload file SI would issue for a module.
+
+    SI *issues* this file; nothing in this package generates one for real. The
+    fixture has to play SI so `write_si_marks` has something faithful to fill
+    in -- otherwise the tests check the writer against its own invention.
+
+    Mark, Grade and CD are left empty, which is how it arrives.
+    """
+    lines = [",".join(SI_COLUMNS)]
+    for index, (sid, first, last, *_) in enumerate(COHORT):
+        key = f"#{sid}/{SI_ATTEMPTS.get(sid, 1)}"
+        lines.append(
+            ",".join(
+                (
+                    "2025/6",
+                    "SEM1",
+                    f"#{code}",
+                    "A",
+                    f"#{code}",
+                    "#1",
+                    key,
+                    f"{first} {last}".upper(),
+                    f"#{SI_CODES[index % len(SI_CODES)]}",
+                    "",   # Mark   -- the module leader's
+                    "",   # Grade  -- the module leader's
+                    "",   # CD     -- nobody's; it stays empty
+                    key,
+                )
+            )
+        )
+    # Bytes, bare LF, trailing newline, no BOM. Writing this as text would
+    # produce CRLF on Windows and the fixture would stop resembling the file
+    # it is standing in for.
+    path.write_bytes(("\n".join(lines) + "\n").encode("utf-8"))
+    return path
+
+
 #: The student who is in the class list but has no submission folder.
 NON_SUBMITTER = "23304311"
 
@@ -480,9 +551,12 @@ def make_fake_module(
                   "grade_cell": GRADE_CELL, "graders": ["KOM", "SOB"]}
             for spec in specs
         ],
-        paths={"classlist": "classlist.xlsx"},
+        paths={"classlist": "classlist.xlsx", "si_file": "PS4001_SI.CSV"},
         overwrite=True,
     )
+
+    # --- the SI upload file, as SI would issue it --------------------------
+    write_si_export(root / "PS4001_SI.CSV", "PS4001")
 
     # --- class list --------------------------------------------------------
     classlist = root / "classlist.xlsx"
@@ -700,9 +774,11 @@ def _make_light_module(
                   "grade_cell": GRADE_CELL, "graders": ["KOM", "SOB"]}
             for spec in specs
         ],
-        paths={"classlist": "classlist.xlsx"},
+        paths={"classlist": "classlist.xlsx", "si_file": f"{code}_SI.CSV"},
         overwrite=True,
     )
+
+    write_si_export(root / f"{code}_SI.CSV", code)
 
     classlist = root / "classlist.xlsx"
     _classlist_frame().to_excel(classlist, index=False)

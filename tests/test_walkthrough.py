@@ -382,3 +382,45 @@ def test_a_moderation_pack_spans_every_marked_assessment(walkthrough):
     assert copied_folders, "nothing was copied at all"
     assert not any("MACOSX" in name for name in copied_folders)
     assert all(" - " in name for name in copied_folders)
+
+
+def test_the_walkthrough_writes_an_si_upload_for_every_module(walkthrough):
+    """All three modules, and each file changed only where it should be.
+
+    The notebook claims two fields moved and nothing else did. This checks
+    that claim on the bytes rather than on the notebook's own arithmetic.
+    """
+    import pathlib as pl
+
+    results = walkthrough["si_results"]
+    modules = [walkthrough[name] for name in ("MODULE", "MODULE_2", "MODULE_3")]
+    assert len(results) == len(modules) == 3
+
+    for module, result in zip(modules, results):
+        issued = pl.Path(module.si_file_path).read_bytes()
+        filled = result.path.read_bytes()
+
+        assert result.filled > 0, f"{module.code} got no marks written"
+        assert result.not_enrolled == [], f"{module.code} had unmatched students"
+        assert b"\r\n" not in filled, f"{module.code}: bare LF turned into CRLF"
+        assert filled.endswith(b"\n")
+        assert not filled.startswith(b"\xef\xbb\xbf")
+
+        before, after = issued.decode().splitlines(), filled.decode().splitlines()
+        assert len(before) == len(after), f"{module.code} gained or lost a line"
+        assert before[0] == after[0], f"{module.code}: the header was rewritten"
+
+        headers = before[0].split(",")
+        moved = {
+            index
+            for was, now in zip(before[1:], after[1:])
+            for index, (a, b) in enumerate(zip(was.split(","), now.split(",")))
+            if a != b
+        }
+        assert {headers[i] for i in moved} <= {"Mark", "Grade"}, (
+            f"{module.code} changed {[headers[i] for i in sorted(moved)]}"
+        )
+
+        # And the file SI issued is left where it was, untouched.
+        assert result.path != pl.Path(module.si_file_path)
+        assert pl.Path(module.si_file_path).read_bytes() == issued
