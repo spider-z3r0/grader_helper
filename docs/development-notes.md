@@ -401,8 +401,12 @@ assumes the one before it works.
    paths, weightings and how many assessments, rather than hand-editing
    `module.toml`. `init_module` is the machinery; this is the front door to
    it.
-6. **Marimo dashboard** — dropdowns and convenience features. The
-   non-technical-colleague story, built strictly on top of the library.
+6. **Marimo dashboard** — the non-technical-colleague story, built strictly
+   on top of the library. **Scope and open questions are in
+   `docs/dashboard-scope.md`**; start a session on the app there rather than
+   here. Two things are decided: it works on a scratch copy and promotes to
+   the real module folder, and it is built for Kev first and hardened for a
+   colleague second. Multi-module discovery is the open one.
 
 **Polars migration** is unblocked but not scheduled: the Excel round-trip
 tests are the contract a port has to keep, and it can land whenever it stops

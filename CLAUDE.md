@@ -50,12 +50,15 @@ should show the import line.
 | moderation samples, borderline | **Moderation packs** |
 | the SI upload file | **The SI upload** |
 | status flags, `record()` | **Keeping status** |
+| the dashboard / app | `docs/dashboard-scope.md` — read that first |
 | quizzes, pass marks, free passes | **Quiz collection** |
 | what to build next | **Next** |
 | something looks broken | **Known gaps** — it may be known |
 
-All in `docs/development-notes.md`. `docs/running-locally.md` is the Windows
-setup and marimo walkthrough; you rarely need it.
+All in `docs/development-notes.md` unless a path is given.
+`docs/running-locally.md` is the Windows setup and marimo walkthrough; you
+rarely need it. `docs/dashboard-scope.md` is the scope for the app and is
+where a session about it starts.
 
 ## House practices
 
