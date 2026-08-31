@@ -904,6 +904,11 @@ fields. Bytes are read and written, with whatever terminator the file already
 had. Linux CI would never catch this by accident, because there a text write
 produces LF anyway, so the test asserts on bytes.
 
+**SI accepts `NG`** — confirmed by the module leader, not assumed. A
+non-participant goes up as `Mark = 0`, `Grade = NG`, which is exactly what
+the departmental sheet says they got, so no special case is needed anywhere
+in the chain.
+
 `#SPR_Code` and `#Cand Key` are **matched on and never rebuilt**. The attempt
 number is SI's and nothing we hold could reproduce it, so a writer that
 reconstructed the key would get every resitting student wrong and nobody
@@ -1332,11 +1337,6 @@ Two things the walkthrough surfaced, neither a bug:
   moves the noise. It stops being cosmetic if stray `EXCEL.EXE` processes
   start accumulating; `app.kill()` after `quit()` and `add_book=False` are
   the things to try then.
-- **Nobody knows whether SI accepts `NG`.** A non-participant reaches the
-  upload as `Mark = 0`, `Grade = NG`, which is what the departmental sheet
-  says they got. If SI rejects that letter the cell needs something else, and
-  that is worth establishing before a real upload rather than during one. The
-  walkthrough prints it so it is at least visible.
 - A `.pyc` is tracked despite `.gitignore` listing `__pycache__/`. Ignore
   rules do not apply to already-tracked files: `git rm --cached` it.
 

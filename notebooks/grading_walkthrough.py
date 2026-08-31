@@ -1507,9 +1507,9 @@ def si_what_changed(issued, si_results):
     Everything else — the `#` prefixes, `#07` with its leading zero, the
     `/3` on a third attempt, the name — is copied through byte for byte.
 
-    **One thing nobody here can answer:** the non-participant goes up as
-    `Mark = 0`, `Grade = NG`. Whether SI accepts that letter is worth finding
-    out before a real upload rather than during one.
+    The non-participant goes up as `Mark = 0`, `Grade = NG`, and **SI
+    accepts `NG`** — checked, not assumed. So no special case is needed
+    anywhere: what the departmental sheet says they got is what SI receives.
     """)
     return
 

@@ -190,7 +190,10 @@ def test_the_mark_is_a_whole_number_and_the_grade_a_letter(si_file, marks):
         for row in rows
     }
     assert written["#23304301/1"] == ("70", "B1"), "not '70.0'"
-    # A non-participant: zero and NG, which is what our pipeline produces.
+    # A non-participant goes up as zero and NG. SI accepts that letter --
+    # confirmed with the module leader rather than assumed -- so the grade
+    # the departmental sheet gives is the grade SI receives, with no special
+    # case anywhere in the chain.
     assert written["#23304309/1"] == ("0", "NG")
 
 
