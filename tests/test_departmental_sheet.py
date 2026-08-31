@@ -544,8 +544,9 @@ def test_writes_to_a_destination_without_touching_the_source(
     out = write_departmental_sheet(
         marks, template_shaped_module, built_sheet, tmp_path / "final.xlsx"
     )
-    assert out == tmp_path / "final.xlsx"
-    assert load_workbook(out)["GradeTemplate"]["A30"].value == "Ahearn, Niamh"
+    assert out.path == tmp_path / "final.xlsx"
+    assert out.written == len(marks), "the count is the evidence record() reads"
+    assert load_workbook(out.path)["GradeTemplate"]["A30"].value == "Ahearn, Niamh"
     assert load_workbook(built_sheet)["GradeTemplate"]["A30"].value is None
 
 

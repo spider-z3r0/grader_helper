@@ -251,7 +251,7 @@ def cw1_distribute_the_feedback_sheets(A):
     distribution = distribute_feedback_sheets(A.submissions_path, A.rubric_path)
 
     mo.md(f"**{distribution}** — unrecognised: `{distribution.unmatched}`")
-    return
+    return (distribution,)
 
 
 @app.cell
@@ -427,11 +427,20 @@ def cw1_rename_for_reupload(A, rename_log):
 
 
 @app.cell
-def cw1_record_progress(HANDLE):
+def cw1_record_progress(HANDLE, distribution):
+    # `record` reads the flag off what the step returned. A Distribution that
+    # copied nothing, or left a folder unrecognised, does *not* set
+    # sheets_distributed -- a green tick against a step that did nothing is
+    # the same failure as a total missing a component.
+    HANDLE.record(distribution, ASSESSMENT_1_ID)
+
+    # These two are still by hand. `save_distributed_graders` returns a path
+    # and `catch_grades` a frame, and neither says whether the step finished,
+    # so there is no evidence for `record` to read yet. See the notes'
+    # "Keeping status".
     HANDLE.set_status(
         ASSESSMENT_1_ID,
         graders_allocated=True,
-        sheets_distributed=True,
         grades_collected=True,
     )
 
@@ -869,10 +878,10 @@ def write_the_departmental_sheet(MODULE, module_marks):
         MODULE, TEMPLATE, MODULE.root / f"{MODULE.code} grades.xlsx",
         overwrite=True,
     )
-    write_departmental_sheet(module_marks, MODULE, sheet_path)
+    written = write_departmental_sheet(module_marks, MODULE, sheet_path)
 
-    mo.md(f"Written to `{sheet_path}`")
-    return (sheet_path,)
+    mo.md(f"**{written}** — `{sheet_path}`")
+    return sheet_path, written
 
 
 @app.cell
@@ -1000,10 +1009,10 @@ def second_module_build_the_sheet(MODULE_2, module_2_marks):
         MODULE_2, TEMPLATE, MODULE_2.root / f"{MODULE_2.code} grades.xlsx",
         overwrite=True,
     )
-    write_departmental_sheet(module_2_marks, MODULE_2, sheet_2_path)
+    written_2 = write_departmental_sheet(module_2_marks, MODULE_2, sheet_2_path)
 
-    mo.md(f"Written to `{sheet_2_path}`")
-    return (sheet_2_path,)
+    mo.md(f"**{written_2}** — `{sheet_2_path}`")
+    return sheet_2_path, written_2
 
 
 @app.cell
@@ -1176,10 +1185,10 @@ def third_module_build_the_sheet(MODULE_3, module_3_marks):
         MODULE_3, TEMPLATE, MODULE_3.root / f"{MODULE_3.code} grades.xlsx",
         overwrite=True,
     )
-    write_departmental_sheet(module_3_marks, MODULE_3, sheet_3_path)
+    written_3 = write_departmental_sheet(module_3_marks, MODULE_3, sheet_3_path)
 
-    mo.md(f"Written to `{sheet_3_path}`")
-    return (sheet_3_path,)
+    mo.md(f"**{written_3}** — `{sheet_3_path}`")
+    return sheet_3_path, written_3
 
 
 @app.cell
@@ -1512,6 +1521,78 @@ def si_what_changed(issued, si_results):
     anywhere: what the departmental sheet says they got is what SI receives.
     """)
     return
+
+@app.cell
+def status_intro():
+    mo.md(
+        """
+        # Keeping status
+
+        Two halves, split by a single question: **can the code honestly
+        know?**
+
+        A step can tell that it produced a file. Whether that file was then
+        *sent*, *read* or *accepted* is in somebody's head and never on disk.
+        So each artefact has a flag the code sets and, where a person has to
+        do something with it, one beside it that only a person can set.
+
+        | the code sets, from evidence | a person sets |
+        |---|---|
+        | `departmental_sheet_written` | `sent_to_department` |
+        | `moderation_pack_built` | `moderated` (per assessment) |
+        | `si_file_written` | `si_submitted` |
+
+        **The evidence is the return value, not the absence of a crash.**
+        `distribute_feedback_sheets` completes perfectly happily having
+        matched nothing at all — forty folders, no ids recognised, no
+        exception. Ticking `sheets_distributed` off that puts a green mark
+        against a step that did nothing, which is this package's usual enemy
+        in a different hat.
+        """
+    )
+    return
+
+
+@app.cell
+def status_record_the_module_level_steps(
+    HANDLE, written, pack, si_results
+):
+    """MODULE LEADER -- and mostly not the module leader at all."""
+    # One call per artefact. `record` looks up the rule for the result's type
+    # and sets the flag only if the evidence supports it.
+    for evidence in (written, pack, si_results[0]):
+        HANDLE.record(evidence)
+
+    recorded_status = ModuleFile.load(ROOT).module.status
+
+    mo.md(f"""
+    ```
+    {recorded_status.model_dump()}
+    ```
+
+    The three automatic flags are set. The two manual ones are still `False`,
+    and correctly so: nothing on this machine can know the sheet reached the
+    department or that the upload was lodged with SI.
+    """)
+    return (recorded_status,)
+
+
+@app.cell
+def status_the_manual_half(HANDLE):
+    """MODULE LEADER -- the button, or this call from a notebook."""
+    # In the dashboard these two are buttons. Here they are the call a
+    # technical user makes.
+    HANDLE.set_module_status(sent_to_department=True)
+
+    mo.md(f"""
+    `{ModuleFile.load(ROOT).module.status.model_dump()}`
+
+    `si_submitted` is deliberately left alone — the upload has not been
+    lodged, and saying it had would be the one kind of lie this whole scheme
+    exists to prevent.
+    """)
+    return
+
 
 if __name__ == "__main__":
     app.run()

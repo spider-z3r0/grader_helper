@@ -31,6 +31,7 @@ House convention: ``pl`` is pathlib, ``pr`` is polars.
 """
 
 import pathlib as pl
+from typing import NamedTuple
 
 from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
@@ -51,13 +52,31 @@ from .departmental_layout import (
 CAPACITY = LAST_DATA_ROW - FIRST_DATA_ROW + 1
 
 
+class DepartmentalWrite(NamedTuple):
+    """What `write_departmental_sheet` did.
+
+    A bare path said the function had run; it did not say whether anything
+    reached the sheet. `written` is what lets a caller -- and
+    `ModuleFile.record` -- tell a finished step from one that merely
+    completed.
+    """
+
+    #: The workbook written.
+    path: pl.Path
+    #: How many students' rows were filled in.
+    written: int
+
+    def __str__(self) -> str:
+        return f"{self.path.name}: {self.written} students"
+
+
 def write_departmental_sheet(
     df: pd.DataFrame,
     module: Module,
     workbook: pl.Path | str,
     destination: pl.Path | str | None = None,
     sheet: str = SHEET_NAME,
-) -> pl.Path:
+) -> DepartmentalWrite:
     """
     Write a module's marks into a departmental grade sheet.
 
@@ -74,7 +93,7 @@ def write_departmental_sheet(
     sheet (str): The tab to write. Defaults to 'GradeTemplate'.
 
     Returns:
-    pl.Path: The path written.
+    DepartmentalWrite: The path written and how many students reached it.
 
     Note:
         Student ids are written as text. A column of digit strings that goes
@@ -169,7 +188,7 @@ def write_departmental_sheet(
     saved = pl.Path(destination) if destination is not None else workbook_path
     saved.parent.mkdir(parents=True, exist_ok=True)
     book.save(saved)
-    return saved
+    return DepartmentalWrite(path=saved, written=len(df))
 
 
 def _header_map(worksheet: Worksheet) -> dict[str, int]:

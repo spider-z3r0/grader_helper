@@ -101,15 +101,75 @@ class ModuleFile:
                 _sync_table(self.document, key, payload.pop(key))
         _sync_aot(self.document, "assessment", assessments)
 
-        # The tool's section: appended at the end of the document, where
+        # The tool's sections: appended at the end of the document, where
         # there is nothing to displace.
         _sync_table(self.document, "status", statuses, add_missing=True)
+        _sync_table(
+            self.document, "module_status", payload.pop("status", {}), add_missing=True
+        )
 
         _atomic_write(target, tomlkit.dumps(self.document))
         self.path = target
         return target
 
     # ------------------------------------------------------------ shortcuts
+
+    def record(self, result, assessment_id: str | None = None) -> "ModuleFile":
+        """Set a status flag from what a step returned, and save.
+
+        The automatic half of status keeping. Hand it whatever a step gave
+        back -- a ``Distribution``, a ``Pack``, an ``SiUpload``, a
+        ``DepartmentalWrite`` -- and the flag it justifies is set.
+
+        **The evidence is the return value, not the absence of an
+        exception.** `distribute_feedback_sheets` completes perfectly happily
+        having matched nothing at all; recording `sheets_distributed = True`
+        off that would put a green tick against a step that did nothing, which
+        is this package's usual enemy wearing a different hat. What counts as
+        done for each result type is in
+        :mod:`grader_helper.recording`, beside the type that knows.
+
+        A result whose evidence does *not* support the flag leaves the status
+        alone and says so, rather than raising -- a half-finished step is a
+        normal state of affairs, not a fault.
+
+        Args:
+        result: What a step returned.
+        assessment_id (str | None): Required for a per-assessment result;
+            ignored for a module-level one.
+
+        Returns:
+        ModuleFile: self, saved.
+
+        Raises:
+        TypeError: If nothing knows how to read evidence from `result`.
+        ValueError: If a per-assessment result arrives without an id.
+
+        Example:
+            >>> distribution = distribute_feedback_sheets(...)
+            >>> handle.record(distribution, assessment.id)
+        """
+        # Imported here rather than at module scope: the registry knows about
+        # file_operations and moderation, both of which import models. A
+        # function-local import keeps the layering honest without a cycle.
+        from ..recording import evidence_for
+
+        flag, satisfied, scope = evidence_for(result)
+
+        if scope == "assessment":
+            if assessment_id is None:
+                raise ValueError(
+                    f"{type(result).__name__} is a per-assessment result, so "
+                    "record() needs the assessment id it belongs to."
+                )
+            if satisfied:
+                return self.set_status(assessment_id, **{flag: True})
+            return self
+
+        if satisfied:
+            setattr(self.module.status, flag, True)
+            self.save()
+        return self
 
     def set_status(self, assessment_id: str, **flags: bool) -> "ModuleFile":
         """Flip status flags on one assessment and save.
@@ -124,6 +184,24 @@ class ModuleFile:
                     f"{list(type(status).model_fields)}"
                 )
             setattr(status, flag, value)
+        self.save()
+        return self
+
+    def set_module_status(self, **flags: bool) -> "ModuleFile":
+        """Flip module-level status flags and save.
+
+        The manual half. `sent_to_department` and `si_submitted` are the ones
+        that matter here: nothing on disk can tell us a file reached a person,
+        so somebody has to say so -- a button in the dashboard, or this call
+        from a notebook.
+        """
+        for flag, value in flags.items():
+            if not hasattr(self.module.status, flag):
+                raise AttributeError(
+                    f"{flag!r} is not a module status flag. Known flags: "
+                    f"{list(type(self.module.status).model_fields)}"
+                )
+            setattr(self.module.status, flag, value)
         self.save()
         return self
 
@@ -161,6 +239,15 @@ def _to_module(document: tomlkit.TOMLDocument, path: pl.Path) -> Module:
         recorded = status.get(assessment.get("id"))
         if recorded:
             assessment["status"] = recorded
+
+    # The module's own status, in its own table -- and read *after* [status]
+    # has been popped, because both land on the model's `status` field and
+    # setting this first silently ate every assessment's flags.
+    #
+    # Deliberately not [status.module]: [status] is keyed by assessment id,
+    # and an assessment legitimately called "module" would collide with it. A
+    # separate table cannot.
+    data["status"] = data.pop("module_status", {}) or {}
 
     # The module block is flattened into the model.
     module_block = data.pop("module", {})

@@ -49,6 +49,7 @@ should show the import line.
 | writing the departmental sheet | **Building the departmental sheet** |
 | moderation samples, borderline | **Moderation packs** |
 | the SI upload file | **The SI upload** |
+| status flags, `record()` | **Keeping status** |
 | quizzes, pass marks, free passes | **Quiz collection** |
 | what to build next | **Next** |
 | something looks broken | **Known gaps** — it may be known |

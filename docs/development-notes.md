@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 477 tests on Linux and 478 with a real Excel:
+Done, 494 tests on Linux and 495 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -872,6 +872,86 @@ Ten of these guards were verified by reintroducing the bug — dropping an
 assessment from the total, pointing N at a formula column, freezing the
 distribution on column I, skipping the clear, writing ids as numbers — and
 watching the test fail.
+
+### Keeping status
+
+Two halves, split by one question: **can the code honestly know?**
+
+A step can tell that it produced a file. Whether that file was then *sent*,
+*read* or *accepted* is in somebody's head and never on disk. So each artefact
+has a flag the code sets and, where a person has to do something with it, one
+beside it that only a person can set.
+
+| the code sets, from evidence | a person sets |
+|---|---|
+| `departmental_sheet_written` | `sent_to_department` |
+| `moderation_pack_built` | `moderated` (per assessment) |
+| `si_file_written` | `si_submitted` |
+| `sheets_distributed` | |
+
+That rule is why `build_moderation_pack` never set `moderated`: a pack
+existing is not a pack having been read.
+
+#### "It did not raise" is not evidence
+
+The tempting rule is *set the flag when the code runs without crashing*. It is
+wrong here, and this package supplies its own counter-examples:
+
+* `distribute_feedback_sheets` returns a `Distribution` that can be entirely
+  `unmatched` — forty folders, no ids recognised, no exception.
+* `collate_module_marks` *warns* for an assessment it found no marks for.
+* `ingest_completed_graderfiles(require_all=False)` warns rather than raises.
+
+A green tick against a step that did nothing looks exactly like a real one —
+the same failure as a total missing a component. So the flag comes from the
+**return value**. `grader_helper/recording.py` holds one rule per result type:
+
+| result | flag | evidence |
+|---|---|---|
+| `Distribution` | `sheets_distributed` | something copied or skipped, and nothing unmatched |
+| `DepartmentalWrite` | `departmental_sheet_written` | rows written |
+| `Pack` | `moderation_pack_built` | the manifest exists |
+| `SiUpload` | `si_file_written` | marks filled, and SI's roll fully accounted for |
+
+`ModuleFile.record(result, assessment_id=None)` looks the rule up and sets the
+flag only if the evidence supports it. A result that falls short leaves the
+status alone without complaint — a half-finished step is a normal state of
+affairs. A result **nothing** has a rule for is refused, because setting a
+flag on no evidence is worse than not setting one.
+
+Adding a step means adding a line to `RULES` and nothing else. The library
+functions stay pure and path-based; they never learn about `ModuleFile`.
+
+Two details worth knowing:
+
+* **`write_departmental_sheet` now returns a `DepartmentalWrite`**, not a bare
+  path. A path said the function had run; it did not say whether anything
+  reached the sheet, so there was no evidence to read.
+* **The rules live one layer up**, in `recording.py`, because they import
+  `file_operations` and `moderation` and those import `models`.
+  `ModuleFile.record` imports the registry inside the method, which keeps the
+  layering honest without a cycle.
+
+#### `[module_status]`, and the bug writing it caused
+
+Module-level status is its own table, **not** `[status.module]`: `[status]` is
+keyed by assessment id, and an assessment legitimately called `module` would
+collide with it.
+
+Reading it back is order-dependent, and getting that wrong ate data. Both
+`[status]` and `[module_status]` land on a model field called `status`, and
+the first version set the module's *before* popping the assessments' —
+silently wiping every assessment flag in the file. `[status]` is popped first
+now, and `test_module_status_and_assessment_status_do_not_clobber_each_other`
+is the guard.
+
+#### Still set by hand
+
+`graders_allocated` and `grades_collected` have no automatic rule yet, because
+their producing functions return a path and a frame — neither says whether the
+step finished. Giving `save_distributed_graders` and the collection path
+evidence-carrying returns, the way `write_departmental_sheet` just got one, is
+the next slice.
 
 ### The SI upload
 

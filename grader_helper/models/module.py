@@ -43,6 +43,49 @@ class ModulePaths(BaseModel):
     si_file: str | None = None
 
 
+class ModuleStatus(BaseModel):
+    """Where the module as a whole has got to.
+
+    Assessment-level state lives on :class:`AssessmentStatus`; these are the
+    things produced once for the module -- the departmental sheet, the
+    moderation pack, the SI upload.
+
+    **The split running through both is what the code can honestly know.** A
+    step can tell that it produced a file; whether that file was then sent,
+    read or accepted is in somebody's head and never on disk. So each artefact
+    has an automatic flag and, where a person has to do something with it, a
+    manual one beside it:
+
+    ==============================  ============================
+    set by the code, from evidence  set by a person
+    ==============================  ============================
+    ``departmental_sheet_written``  ``sent_to_department``
+    ``moderation_pack_built``       (per assessment: ``moderated``)
+    ``si_file_written``             ``si_submitted``
+    ==============================  ============================
+
+    The automatic ones are set by :meth:`ModuleFile.record` from what a step
+    returned, **not** from its having failed to raise -- see
+    :mod:`grader_helper.recording`. The manual ones are a button in the
+    dashboard, or `set_status` from a notebook.
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    # --- the code can see these happen -----------------------------------
+    departmental_sheet_written: bool = False
+    moderation_pack_built: bool = False
+    si_file_written: bool = False
+
+    # --- only a person knows these ---------------------------------------
+    #: The sheet reached the department. We wrote a file; we cannot know it
+    #: was sent.
+    sent_to_department: bool = False
+    #: The upload was actually lodged with SI, which happens outside this
+    #: package entirely.
+    si_submitted: bool = False
+
+
 class Module(BaseModel):
     """A module and everything needed to run its assessment."""
 
@@ -58,6 +101,7 @@ class Module(BaseModel):
 
     paths: ModulePaths = Field(default_factory=ModulePaths)
     assessments: list[Assessment] = Field(default_factory=list)
+    status: ModuleStatus = Field(default_factory=ModuleStatus)
 
     #: The directory holding module.toml. Populated on load, never written
     #: back -- see the module docstring.

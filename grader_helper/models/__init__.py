@@ -4,7 +4,7 @@
 """Domain models for a taught module and its assessment."""
 
 from .assessment import Assessment, AssessmentStatus, AssessmentType, tidy_number
-from .module import SCHEMA_VERSION, Module, ModulePaths
+from .module import SCHEMA_VERSION, Module, ModulePaths, ModuleStatus
 from .module_file import (
     MODULE_FILENAME,
     ModuleFile,
@@ -20,6 +20,7 @@ __all__ = [
     "Module",
     "ModuleFile",
     "ModulePaths",
+    "ModuleStatus",
     "MODULE_FILENAME",
     "init_module",
     "load_module",

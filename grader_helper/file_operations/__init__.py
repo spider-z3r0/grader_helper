@@ -11,7 +11,7 @@ from .catch_grades import catch_grades
 from .brightspace_name_folders import brightspace_name_folders
 from .departmental_layout import DepartmentalLayout
 from .build_departmental_sheet import build_departmental_sheet
-from .write_departmental_sheet import write_departmental_sheet
+from .write_departmental_sheet import DepartmentalWrite, write_departmental_sheet
 
 
 __all__ = [
@@ -25,5 +25,6 @@ __all__ = [
     "brightspace_name_folders",
     "DepartmentalLayout",
     "build_departmental_sheet",
+    "DepartmentalWrite",
     "write_departmental_sheet",
 ]
