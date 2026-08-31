@@ -222,6 +222,53 @@ folder. Neither is stored by grader_helper — `module.toml` is the only file
 it writes, and it holds no absolute paths, so a module folder still works
 after OneDrive syncs it to another machine.
 
+### Running the assessment from the page
+
+Once a module is loaded, the page runs it. Pick the assessment you are
+working on at **Working on**, and the steps appear in the order the work
+happens:
+
+| | | |
+|---|---|---|
+| 1 | allocate the marking | `distributed.xlsx` and a workbook per grader |
+| 1a | resolve multiple submissions | only when a student submitted twice |
+| 2 | distribute the feedback sheets | a sheet per student, folders renamed |
+| | *the graders mark, over days or weeks* | |
+| 3 | collect and reconcile the marks | `completed_grades.xlsx` and the audit |
+| 4 | rename the folders back | ready to go back up to Brightspace |
+| 5 | collate the module | every mark in one frame, totalled and banded |
+| 6 | the departmental sheet | the department's workbook, filled in |
+| 7 | the moderation pack | `Moderation/`, with its manifest |
+| 8 | SI's upload | SI's own file with two columns filled |
+| 9 | the flags only you know | moderated, sent, lodged |
+
+Steps 5 to 8 need step 5 run first — everything after it works from what the
+collation produced. **Click "Re-read this folder" after a step** to see the
+status it recorded.
+
+Three things worth knowing before you start:
+
+- **It writes straight into the module folder.** There is no scratch copy
+  yet. Nothing overwrites a feedback sheet — one already in a student's
+  folder may carry a mark, and no tick changes that — but everything else
+  goes where it goes.
+- **A step can decline to record.** If a folder in the submissions tree is
+  not recognised, `sheets_distributed` stays unset and the page says which
+  folder caused it: a run that matched every student but one has not
+  finished. Move the stray folder out and press it again.
+- **Steps 6 and 8 need two files the department and SI issue.** Put them in
+  the module folder and name them in `module.toml`:
+
+  ```toml
+  [paths]
+  departmental_template = "Dept grade sheet Template 2026.xlsx"
+  si_file = "PS4034_SI.CSV"
+  ```
+
+  A module set up through the form is asked for both. One set up earlier has
+  to have the lines added by hand — grader_helper only ever updates keys that
+  are already in the file, which is how your comments survive every save.
+
 If a `module.toml` is there but will not load, the page shows the error and
 the path to edit, and does **not** offer to set the folder up again. That is
 deliberate: the file holds the graders, the quiz rules and everything
