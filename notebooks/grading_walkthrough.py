@@ -12,7 +12,11 @@ with app.setup():
     from openpyxl import load_workbook
 
     sys.path.insert(0, "tests")          # so `fake_module` is importable
-    from fake_module import make_fake_module
+    from fake_module import (
+        make_fake_module,
+        make_second_module,
+        make_third_module,
+    )
 
     from grader_helper import (
         alphabetise_folders,
@@ -20,6 +24,8 @@ with app.setup():
         catch_grades,
         distribute_feedback_sheets,
         extract_studentid_grade,
+        build_departmental_sheet,
+        build_moderation_pack,
         collate_module_marks,
         collect_quiz_marks,
         import_brightspace_classlist,
@@ -27,8 +33,14 @@ with app.setup():
         prepare_data_for_departmental_template,
         read_quiz,
         save_distributed_graders,
+        flag_borderline,
+        read_moderation_manifest,
+        sample_for_moderation,
+        save_collated_grades,
         save_grader_sheets,
         scan_multiple_subs,
+        write_departmental_sheet,
+        write_si_marks,
     )
     from grader_helper.file_operations.brightspace_name_folders import (
         brightspace_name_folders,
@@ -47,6 +59,21 @@ with app.setup():
             "GRADER_HELPER_SCRATCH", pl.Path.home() / "grader_helper_scratch"
         )
     ) / "PS4001"
+
+    # The second module, which exists to show a shape the department's
+    # template has no room for. Same scratch directory, beside PS4001.
+    ROOT_2 = ROOT.parent / "PS4002"
+
+    # And a third, with four assessments collected three different ways.
+    ROOT_3 = ROOT.parent / "PS4003"
+
+    # The department's own workbook, which lives in the repo. Located from
+    # this file rather than the working directory, so the notebook works
+    # wherever marimo is started from.
+    TEMPLATE = (
+        pl.Path(__file__).resolve().parent.parent
+        / "Dept grade sheet Template 2026.xlsx"
+    )
 
     # The assessments this walkthrough drives.
     ASSESSMENT_1_ID = "cw1"
@@ -211,7 +238,7 @@ def cw1_save_the_grader_sheets(A, GRADERS, allocation):
     )
 
     mo.md(f"""
-    - master: `{master.name}` at the assessment root
+    - master: **{master}** at the assessment root
     - workbooks: `{[p.name for p in workbooks.values()]}` in `grading_output/`
     """)
     return
@@ -225,7 +252,7 @@ def cw1_distribute_the_feedback_sheets(A):
     distribution = distribute_feedback_sheets(A.submissions_path, A.rubric_path)
 
     mo.md(f"**{distribution}** — unrecognised: `{distribution.unmatched}`")
-    return
+    return (distribution,)
 
 
 @app.cell
@@ -334,12 +361,16 @@ def cw1_leader_collates_the_grade_sheets(A, GRADERS):
         A.grading_output_path,
         GRADERS,
         file_type="excel",
-        save=True,
-        overwrite=True,
+    )
+    # Writing the collated file is its own call, so the artefact reports what
+    # went into it -- `completed_grades.xlsx` existing is what says the grades
+    # were collected, and an empty one is not a collection.
+    collation = save_collated_grades(
+        completed, A.grading_output_path, file_type="excel", overwrite=True
     )
 
-    completed
-    return (completed,)
+    mo.md(f"**{collation}**")
+    return collation, completed
 
 
 @app.cell
@@ -401,13 +432,16 @@ def cw1_rename_for_reupload(A, rename_log):
 
 
 @app.cell
-def cw1_record_progress(HANDLE):
-    HANDLE.set_status(
-        ASSESSMENT_1_ID,
-        graders_allocated=True,
-        sheets_distributed=True,
-        grades_collected=True,
-    )
+def cw1_record_progress(HANDLE, master, distribution, collation):
+    # Every flag here comes from an artefact. `record` reads the evidence off
+    # what each step returned and sets the flag only if it holds up: a
+    # Distribution that copied nothing, or left a folder unrecognised, does
+    # *not* set sheets_distributed. A green tick against a step that did
+    # nothing is the same failure as a total missing a component.
+    # `evidence` would clash: marimo counts a loop variable as a definition,
+    # and every name in the notebook must be defined in exactly one cell.
+    for cw1_evidence in (master, distribution, collation):
+        HANDLE.record(cw1_evidence, ASSESSMENT_1_ID)
 
     # Read back the assessment we just wrote, not the other one.
     status = ModuleFile.load(ROOT).module.assessment(ASSESSMENT_1_ID).status
@@ -490,7 +524,7 @@ def cw2_save_the_grader_sheets(A2, GRADERS2, allocation2):
     )
 
     mo.md(f"""
-    - master: `{master2.name}` at the assessment root
+    - master: **{master2}** at the assessment root
     - workbooks: `{[p.name for p in workbooks2.values()]}` in `grading_output/`
     """)
     return
@@ -800,9 +834,761 @@ def look_at_the_edges(module_sheet):
     | 23304309 Joyce | {graded.loc["23304309", "Total % Grade"]} | {graded.loc["23304309", "Letter Grade"]} | scored zero on everything and sat no quiz. NG, not F -- no participation is a different thing from a mark of zero |
     | 23304311 Lynch | {graded.loc["23304311", "Total % Grade"]} | {graded.loc["23304311", "Letter Grade"]} | never submitted, and still on the sheet. A student missing from the sheet has no grade at all, which nobody notices |
 
-    Writing this into the department's own workbook is the next piece, and it
-    needs the workbook: `paths.departmental_sheet` in `module.toml` is where
-    it goes.
+    That frame is *our* arithmetic. The next cell puts it into the
+    department's own workbook, which is the arithmetic that counts.
+    """)
+    return
+
+
+@app.cell
+def the_departmental_workbook():
+    mo.md(
+        """
+        ## Into the department's workbook
+
+        The frame above is our arithmetic. The workbook is the department's,
+        and where the two disagree the workbook wins -- it is the source of
+        truth precisely because anyone can open it and read the grades
+        without running any of this.
+
+        So two steps, and the split matters:
+
+        - `build_departmental_sheet` lays the sheet out for the module's
+          assessments and writes the department's **formulas** into it. It
+          never writes a computed value, so the sheet still does its own
+          arithmetic.
+        - `write_departmental_sheet` puts in the name, the student id and
+          each mark as awarded. Five values a row for this module, and
+          nothing else -- filling in the weighted columns or the total would
+          replace the department's arithmetic with ours, which is backwards.
+
+        PS4001 is the shape the template was drawn for, so building it is a
+        no-op in effect: you get the department's own file back, minus the
+        sample rows. The module after this one is the interesting case.
+        """
+    )
+    return
+
+
+@app.cell
+def write_the_departmental_sheet(MODULE, module_marks):
+    """MODULE LEADER -- the sheet that goes to the department."""
+    sheet_path = build_departmental_sheet(
+        MODULE, TEMPLATE, MODULE.root / f"{MODULE.code} grades.xlsx",
+        overwrite=True,
+    )
+    written = write_departmental_sheet(module_marks, MODULE, sheet_path)
+
+    mo.md(f"**{written}** — `{sheet_path}`")
+    return sheet_path, written
+
+
+@app.cell
+def check_what_landed(sheet_path):
+    # Read it back the way a colleague would -- openpyxl does not evaluate
+    # formulas, so this shows what is actually stored in each cell rather
+    # than what Excel makes of it.
+    landed = load_workbook(sheet_path)["GradeTemplate"]
+
+    mo.md(f"""
+    Row 29 (the headers): `{[landed.cell(29, i).value for i in range(1, 11)]}`
+
+    | cell | holds | |
+    |---|---|---|
+    | `A30` | `{landed["A30"].value}` | ours |
+    | `C30` | `{landed["C30"].value}` | ours -- the mark as awarded |
+    | `D30` | `{landed["D30"].value}` | the department's |
+    | `F30` | `{landed["F30"].value}` | the department's |
+    | `H30` | `{landed["H30"].value}` | the department's |
+
+    `F30` is `=E30/2`, not `=E30/100*50`. Those are the same sum on paper and
+    not in floating point: `x/2` is exact, `x/100*50` is two roundings, and
+    since the total is `ROUND(SUM(...),0)` the difference lands on whole
+    marks. At a coursework mark of 29 the two give 15 and 14.
+    """)
+    return
+
+
+@app.cell
+def second_module_intro():
+    mo.md(
+        """
+        # A module the template has no room for
+
+        Everything above is **PS4001**: two courseworks and an MCQ, which is
+        exactly the permutation the departmental template was drawn for. Its
+        formulas hardcode that shape -- `D=C/100*40`, `F=E/2`, and a total
+        summing exactly `D, F, G`.
+
+        **PS4002** is one coursework worth 30 and *two* MCQs worth 35 each.
+        Nothing exotic; simply a shape the department's file was not drawn
+        for. Until now that meant the module leader reshaped the block by
+        hand, and the two places that goes wrong are the two that move when
+        the block changes width:
+
+        - the **descriptives at A23** -- Mean, SD and N, one formula per
+          column, and nothing complains when the last one is missing. A mean
+          over two of three components is a perfectly plausible number.
+        - the **Letter Grade column** and the eleven `COUNTIF`s that read it.
+          Miss one and the distribution reports the whole cohort as NG.
+
+        Same cohort, same class list -- these are the same students taking a
+        second module.
+        """
+    )
+    return
+
+
+@app.cell
+def init_the_second_module():
+    # Lighter than PS4001's fixture on purpose. The marking pipeline is
+    # demonstrated twice above, so this writes only what is needed to
+    # collate a module and build its sheet: the coursework gets feedback
+    # sheets, the MCQs get nothing at all.
+    SECOND = make_second_module(ROOT_2)
+    MODULE_2 = ModuleFile.load(ROOT_2).module
+
+    mo.md(f"""
+    **{MODULE_2.code} {MODULE_2.name}** ({MODULE_2.year})
+
+    - leader: `{MODULE_2.leader}`
+    - weights: `{ {a.name: a.weight for a in MODULE_2.assessments} }`
+    - grade sheet columns: `{MODULE_2.grade_sheet_columns}`
+
+    {len(MODULE_2.grade_sheet_columns)} columns of assessment where the
+    template has five.
+
+    The two MCQs are marked on **different scales**, which is the real
+    situation rather than a contrivance: an MCQ is sometimes graded out of 100
+    and then weighted, and sometimes graded out of however many questions it
+    had. MCQ 1 is out of 100 worth 35; MCQ 2 is out of 10 worth 35. Both need
+    a weighted column, and the sheet will end up holding one of each form.
+    """)
+    return MODULE_2, SECOND
+
+
+@app.cell
+def second_module_collate(MODULE_2, SECOND, cl):
+    """MODULE LEADER -- every assessment's marks, in one frame."""
+    # The coursework is read off its feedback sheets, as ever. The two MCQs
+    # were sat on paper in a lecture theatre, so nothing on disk holds them
+    # and they are handed in through `marks=`. collate_module_marks decides
+    # per assessment by asking what it *has*, not what its type says.
+    second_by_id = SECOND.expected.set_index("Student ID")
+
+    module_2_marks = collate_module_marks(
+        MODULE_2,
+        cl,
+        source="feedback",
+        marks={
+            "mcq1": second_by_id["mcq1"].to_dict(),
+            "mcq2": second_by_id["mcq2"].to_dict(),
+        },
+    )
+
+    module_2_marks
+    return (module_2_marks,)
+
+
+@app.cell
+def second_module_prepare(MODULE_2, module_2_marks):
+    """MODULE LEADER -- totalled, banded, in the department's column order."""
+    module_2_sheet = prepare_data_for_departmental_template(
+        module_2_marks, MODULE_2
+    )
+
+    module_2_sheet
+    return (module_2_sheet,)
+
+
+@app.cell
+def second_module_build_the_sheet(MODULE_2, module_2_marks):
+    """MODULE LEADER -- and this is the part that was done by hand."""
+    sheet_2_path = build_departmental_sheet(
+        MODULE_2, TEMPLATE, MODULE_2.root / f"{MODULE_2.code} grades.xlsx",
+        overwrite=True,
+    )
+    written_2 = write_departmental_sheet(module_2_marks, MODULE_2, sheet_2_path)
+
+    mo.md(f"**{written_2}** — `{sheet_2_path}`")
+    return sheet_2_path, written_2
+
+
+@app.cell
+def second_module_what_the_builder_did(sheet_2_path):
+    built = load_workbook(sheet_2_path)["GradeTemplate"]
+    headers = [built.cell(29, i).value for i in range(1, 11)]
+
+    mo.md(f"""
+    ### What would otherwise have been hand-edited
+
+    Row 29: `{headers}`
+
+    | | | |
+    |---|---|---|
+    | weighting | `{built["D30"].value}` | coursework, 100 marks worth 30 |
+    | weighting | `{built["F30"].value}` | MCQ 1, graded out of 100 then weighted |
+    | weighting | `{built["H30"].value}` | MCQ 2, graded out of 10 -- a scale *up* |
+    | **total** | `{built["I30"].value}` | three components, not the template's `D, F, G` |
+    | **letter** | `{built["J30"].value[:38]}...` | reads `I30`, not the template's `H30` |
+
+    The descriptives moved with it -- one column each, none missed:
+
+    | row | C | E | G | I |
+    |---|---|---|---|---|
+    | Mean | `{built["C23"].value}` | `{built["E23"].value}` | `{built["G23"].value}` | `{built["I23"].value}` |
+    | N | `{built["C25"].value}` | `{built["E25"].value}` | `{built["G25"].value}` | `{built["I25"].value}` |
+
+    And the distribution follows the Letter Grade column wherever it landed:
+    `{built["H6"].value}`
+
+    Two details worth reading twice. The **N row counts the raw column**, not
+    its own -- `D25` counts `C`, because the weighting formula sits in all 501
+    rows and counting it would return 501 whatever the cohort.
+
+    And none of these weightings simplifies to a single divisor, because
+    neither 100 nor 10 divides 35 exactly. Where one does divide -- PS4001's
+    `=E30/2` -- the shorter form is used, because it is the one that is exact
+    in floating point.
+    """)
+    return
+
+
+@app.cell
+def third_module_intro():
+    mo.md(
+        """
+        # A full module: four assessments, three sources
+
+        **PS4003** is the shape a real module tends to have — a coursework,
+        weekly quizzes, an MCQ and an exam — and it is here for a different
+        reason from PS4002. PS4002 was about the *sheet*: a block the template
+        has no room for. This one is about the *collation*.
+
+        Its four assessments arrive by three different routes:
+
+        | | comes from | read by |
+        |---|---|---|
+        | Coursework 1 | feedback sheets in the download | `catch_grades` |
+        | Quizzes | Brightspace's own exports | `collect_quiz_marks` |
+        | MCQ | marked on paper | handed in via `marks=` |
+        | Exam | marked on paper | handed in via `marks=` |
+
+        PS4001 covers the first two, PS4002 the first and third. Nothing until
+        now has put all three in one module, and that is the thing worth
+        trying: `collate_module_marks` chooses a source **per assessment**, by
+        asking what each one *has* rather than what its `type` says. A module
+        with one source is not evidence that it does.
+
+        The quizzes here are **ten quizzes for ten marks with no free pass**,
+        so a student's mark is simply the number they passed. PS4001 sets
+        eleven for ten and forgives one. Both sets of rules live in their own
+        `module.toml`, which is the point — nothing in this notebook restates
+        them.
+        """
+    )
+    return
+
+
+@app.cell
+def init_the_third_module():
+    THIRD = make_third_module(ROOT_3)
+    MODULE_3 = ModuleFile.load(ROOT_3).module
+    quizzes_3 = MODULE_3.assessment("quizzes")
+
+    mo.md(f"""
+    **{MODULE_3.code} {MODULE_3.name}** ({MODULE_3.year})
+
+    - weights: `{ {a.name: a.weight for a in MODULE_3.assessments} }`
+    - grade sheet columns: `{MODULE_3.grade_sheet_columns}`
+
+    | | |
+    |---|---|
+    | quiz exports written | `{len(THIRD.quiz_exports["quizzes"])}` |
+    | pass mark | `{quizzes_3.pass_mark}` — strictly above |
+    | free passes | `{quizzes_3.free_passes}` |
+
+    Seven assessment columns. The quizzes need no weighted one — ten marks
+    worth ten — so a raw column sits in the middle of the block with weighted
+    columns either side of it, which is the case most likely to trip a
+    hand-edit.
+    """)
+    return MODULE_3, THIRD
+
+
+@app.cell
+def third_module_collate(MODULE_3, THIRD, cl):
+    """MODULE LEADER -- four assessments, three sources, one call."""
+    # Only the MCQ and the exam are handed in. The coursework is found by its
+    # grade_cell and read off the feedback sheets; the quizzes are found by
+    # the exports sitting in their submissions folder. Neither is mentioned
+    # here, and that is the point being demonstrated.
+    third_by_id = THIRD.expected.set_index("Student ID")
+
+    module_3_marks = collate_module_marks(
+        MODULE_3,
+        cl,
+        source="feedback",
+        marks={
+            "mcq": third_by_id["mcq"].to_dict(),
+            "exam": third_by_id["exam"].to_dict(),
+        },
+    )
+
+    module_3_marks
+    return (module_3_marks,)
+
+
+@app.cell
+def third_module_check_the_sources(MODULE_3, THIRD, module_3_marks):
+    # Worth confirming rather than assuming: the two columns nobody handed in
+    # are the two that had to be found on disk.
+    found = module_3_marks.set_index("Student ID")
+    expected_3 = THIRD.expected.set_index("Student ID")
+    coursework = MODULE_3.assessment("cw1").raw_column
+    quizzes = MODULE_3.assessment("quizzes").raw_column
+
+    mo.md(f"""
+    | column | source | agrees with the fixture |
+    |---|---|---|
+    | `{coursework}` | feedback sheets | `{
+        found[coursework].dropna().to_dict()
+        == expected_3["cw1"].dropna().to_dict()
+    }` |
+    | `{quizzes}` | Brightspace exports | `{
+        found[quizzes].to_dict() == expected_3["quizzes"].to_dict()
+    }` |
+
+    Neither was passed in. `collate_module_marks` found the coursework by its
+    `grade_cell` and the quizzes by the exports in their submissions folder,
+    in the same call that took the MCQ and exam as handed-in values.
+    """)
+    return
+
+
+@app.cell
+def third_module_prepare(MODULE_3, module_3_marks):
+    """MODULE LEADER -- totalled, banded, in the department's column order."""
+    module_3_sheet = prepare_data_for_departmental_template(
+        module_3_marks, MODULE_3
+    )
+
+    module_3_sheet
+    return (module_3_sheet,)
+
+
+@app.cell
+def third_module_build_the_sheet(MODULE_3, module_3_marks):
+    """MODULE LEADER -- seven assessment columns, laid out and filled."""
+    sheet_3_path = build_departmental_sheet(
+        MODULE_3, TEMPLATE, MODULE_3.root / f"{MODULE_3.code} grades.xlsx",
+        overwrite=True,
+    )
+    written_3 = write_departmental_sheet(module_3_marks, MODULE_3, sheet_3_path)
+
+    mo.md(f"**{written_3}** — `{sheet_3_path}`")
+    return sheet_3_path, written_3
+
+
+@app.cell
+def third_module_what_the_builder_did(sheet_3_path):
+    wide = load_workbook(sheet_3_path)["GradeTemplate"]
+
+    mo.md(f"""
+    ### Seven assessment columns
+
+    Row 29: `{[wide.cell(29, i).value for i in range(1, 13)]}`
+
+    | | | |
+    |---|---|---|
+    | weighting | `{wide["D30"].value}` | coursework, 100 marks worth 30 |
+    | *(none)* | — | quizzes, 10 marks worth 10: nothing to weight |
+    | weighting | `{wide["G30"].value}` | MCQ, 100 worth 20 — **divides exactly** |
+    | weighting | `{wide["I30"].value}` | exam, 100 worth 40 |
+    | **total** | `{wide["J30"].value}` | four components, and `E30` is a raw column |
+    | **letter** | `{wide["K30"].value[:38]}...` | reads `J30` |
+
+    `=F30/5` is the exact-divisor form: 100 goes into 20 five times, so a
+    single division does it and a single division is exact. The coursework and
+    exam get `/100*30` and `/100*40` because 100 does not divide 30 or 40.
+
+    The total is the one to look at. `E30` — the quizzes — is a **raw** column
+    and reaches the total directly, sitting between two weighted ones. Summing
+    the weighted columns and forgetting it, or summing every other column and
+    double-counting the raw marks, are both easy hand-edits and both give a
+    plausible number.
+
+    Descriptives, one per column, none missed:
+
+    | | C | E | F | H | J |
+    |---|---|---|---|---|---|
+    | Mean | `{wide["C23"].value}` | `{wide["E23"].value}` | `{wide["F23"].value}` | `{wide["H23"].value}` | `{wide["J23"].value}` |
+    | N | `{wide["C25"].value}` | `{wide["E25"].value}` | `{wide["F25"].value}` | `{wide["H25"].value}` | `{wide["J25"].value}` |
+
+    And the distribution: `{wide["H6"].value}`
+    """)
+    return
+
+
+@app.cell
+def moderation_intro():
+    mo.md(
+        """
+        # Moderation
+
+        A second marker looks at a sample of the marking. Two things decide
+        who is in it, and the second is the one the department is currently
+        arguing about:
+
+        - **a random sample per grade band** — one student from each of A1
+          down to D1, so the moderator sees the range rather than whoever is
+          at the top of the list;
+        - **the borderline cases** — students within a point of the next
+          grade up. 69 and 70 are one mark apart and a degree classification
+          apart, so if a mark is wrong it costs the student more there than
+          anywhere else in the range.
+
+        Today the borderline students are *flagged* and the draw is random.
+        The department is discussing moderating on the borderline alone, so
+        `sample_for_moderation` takes `borderline="include"` and is ready for
+        that without a rewrite.
+
+        **The draw records its seed.** A random sample that comes out
+        different every run cannot answer "why was this student moderated?"
+        six months later, and re-running quietly changes the answer. The seed
+        goes into the manifest with everything else.
+        """
+    )
+    return
+
+
+@app.cell
+def moderation_who_is_near_a_boundary(module_3_sheet):
+    """MODULE LEADER -- who a single mark would have moved."""
+    near = flag_borderline(module_3_sheet)
+
+    near[
+        ["Name", "Student ID", "Total % Grade", "Letter Grade",
+         "Next Grade", "Points To Next", "Borderline"]
+    ].sort_values("Points To Next")
+    return (near,)
+
+
+@app.cell
+def moderation_draw_the_sample(module_3_sheet):
+    """MODULE LEADER -- one per band, plus the borderline cases."""
+    # No seed passed, so one is generated and handed back. Write it down --
+    # it is what makes this draw defensible later. `also=` takes anyone the
+    # leader wants a second opinion on regardless of band.
+    moderation = sample_for_moderation(
+        module_3_sheet, n=1, borderline="include"
+    )
+
+    mo.md(f"""
+    **{moderation}**
+
+    Bands that could not fill the quota: `{moderation.short_bands or "none"}`
+    """)
+    return (moderation,)
+
+
+@app.cell
+def moderation_who_was_chosen(moderation):
+    moderation.selected[
+        ["Name", "Student ID", "Total % Grade", "Letter Grade",
+         "Points To Next", "Selected Because"]
+    ]
+    return
+
+
+@app.cell
+def moderation_build_the_pack(MODULE_3, moderation):
+    """MODULE LEADER -- the folders the second marker is handed."""
+    pack = build_moderation_pack(
+        MODULE_3, moderation, MODULE_3.root / "Moderation", overwrite=True
+    )
+
+    mo.md(f"""
+    **{pack}** — `{pack.root}`
+
+    | | |
+    |---|---|
+    | copied, per assessment | `{pack.copied}` |
+    | selected but nothing submitted | `{pack.missing or "none"}` |
+    | manifest | `{pack.manifest.name}` |
+
+    Only the coursework has a download to copy from. The quizzes, the MCQ and
+    the exam have no submissions folder, so they are skipped — there is
+    nothing to moderate and nothing has gone wrong.
+
+    A student who was selected but submitted nothing is **named** rather than
+    left as an empty folder. An empty folder in a pack reads as work the
+    moderator has already been through.
+    """)
+    return (pack,)
+
+
+@app.cell
+def moderation_the_manifest(pack):
+    # The record of the draw, and the handoff to the external examiner's pack
+    # later. The folders can be rebuilt from this; without it they cannot.
+    read_moderation_manifest(pack.root)[
+        ["Module", "Student ID", "Letter Grade", "Selected Because",
+         "Seed", "N Per Band", "Missing Submissions"]
+    ]
+    return
+
+
+@app.cell
+def moderation_the_seed_reproduces_the_draw(module_3_sheet, moderation, pack):
+    # `repeated` is taken by the cw1 resubmission cell -- marimo needs every
+    # name in the notebook to be defined once.
+    recorded_seed = int(read_moderation_manifest(pack.root)["Seed"].iloc[0])
+    redrawn = sample_for_moderation(
+        module_3_sheet, n=1, borderline="include", seed=recorded_seed
+    )
+
+    reproduced = (
+        redrawn.selected["Student ID"].tolist()
+        == moderation.selected["Student ID"].tolist()
+    )
+
+    mo.md(f"""
+    Seed `{recorded_seed}` read back out of the manifest reproduces the draw
+    exactly: **{reproduced}**
+
+    That is the whole point of recording it. Anyone with the marks and the
+    seed can check that the sample was what it says it was, and re-running
+    reuses the draw rather than quietly making a new one.
+    """)
+    return
+
+
+@app.cell
+def moderation_a_pack_spanning_two_assessments(MODULE, module_sheet):
+    """MODULE LEADER -- the same thing on PS4001, which has two marked pieces.
+
+    PS4003 has one assessment with a download to copy from. PS4001 has two,
+    which is the ordinary case: the moderator gets each sampled student's
+    coursework 1 *and* coursework 2, under the one band folder.
+    """
+    ps4001_sample = sample_for_moderation(module_sheet, n=1, borderline="include")
+    ps4001_pack = build_moderation_pack(
+        MODULE, ps4001_sample, MODULE.root / "Moderation", overwrite=True
+    )
+
+    mo.md(f"""
+    **{ps4001_pack}** — `{ps4001_pack.root}`
+
+    | | |
+    |---|---|
+    | copied, per assessment | `{ps4001_pack.copied}` |
+    | nothing submitted | `{ps4001_pack.missing or "none"}` |
+
+    Both courseworks are in the pack. The quizzes are not: their submissions
+    folder holds Brightspace's CSV exports rather than student folders, so
+    there is nothing to copy and nothing has gone wrong.
+
+    The download also contains a `__MACOSX` directory and a stray
+    `index.html`, which is what a real unzipped download looks like. Neither
+    is a submission folder, so neither reaches the moderator — folder names
+    are parsed, and anything that is not a Brightspace submission simply does
+    not parse.
+    """)
+    return ps4001_pack, ps4001_sample
+
+
+@app.cell
+def si_intro():
+    mo.md(
+        """
+        # The SI upload
+
+        The last step. The student information system **issues** a file with
+        one row per enrolled student and three columns blank -- `Mark`,
+        `Grade`, and a `CD` nobody fills -- and you send the same file back.
+
+        So this is the departmental sheet's problem again: we fill in two
+        fields of somebody else's file and change nothing else. Not "produce
+        a file in SI's format".
+
+        Three quirks make that harder than it sounds, and all three are real:
+
+        | | |
+        |---|---|
+        | line endings | **bare LF**, on a file a Windows system produced |
+        | quoting | none, and no field holds a comma — `KEVIN O'MALLEY`, not `O'MALLEY, KEVIN` |
+        | `#` prefixes | on headers *and* values, and `#CD` holds `#07` |
+
+        The first is the one that bites. Python's `open(path, "w")` turns
+        `\n` into `\r\n` on Windows, so writing the file back the obvious
+        way changes **every line in it** — a function asked to change two
+        fields rewriting all forty. `write_si_marks` reads and writes bytes.
+
+        `#SPR_Code` is `#<student id>/<attempt>`, the attempt being how many
+        times they have taken the module. It is matched on and **never
+        rebuilt**: that number is SI's, and nothing we hold could reproduce
+        it.
+        """
+    )
+    return
+
+
+@app.cell
+def si_what_si_issued(MODULE):
+    # The fixture plays SI here. Nothing in the package generates one of
+    # these for real -- SI sends it, we fill it in and send it back.
+    issued = MODULE.si_file_path.read_bytes()
+
+    mo.md(f"""
+    `{MODULE.si_file_path.name}`, as issued:
+
+    ```
+    {issued.decode().splitlines()[0]}
+    {issued.decode().splitlines()[1]}
+    ```
+
+    | | |
+    |---|---|
+    | CRLF | `{b"\r\n" in issued}` |
+    | BOM | `{issued[:3] == b"\xef\xbb\xbf"}` |
+    | quotes | `{b'"' in issued}` |
+    | rows | `{len(issued.decode().splitlines()) - 1}` |
+    """)
+    return (issued,)
+
+
+@app.cell
+def si_fill_all_three_modules(
+    MODULE, MODULE_2, MODULE_3, module_sheet, module_2_sheet, module_3_sheet
+):
+    """MODULE LEADER -- one upload per module."""
+    si_results = [
+        write_si_marks(sheet, module.si_file_path, module.root / f"{module.code}_upload.CSV")
+        for module, sheet in (
+            (MODULE, module_sheet),
+            (MODULE_2, module_2_sheet),
+            (MODULE_3, module_3_sheet),
+        )
+    ]
+
+    mo.md("\n".join(f"- **{result}**" for result in si_results))
+    return (si_results,)
+
+
+@app.cell
+def si_what_changed(issued, si_results):
+    # The claim is that two fields moved and nothing else did. Rather than
+    # take that on trust, diff the bytes field by field.
+    #
+    # Every name here is prefixed: marimo requires each to be defined in
+    # exactly one cell across the whole notebook, and `headers` was already
+    # taken by the PS4002 section.
+    si_filled = si_results[0].path.read_bytes()
+    si_before = issued.decode().splitlines()
+    si_after = si_filled.decode().splitlines()
+
+    si_moved = sorted(
+        {
+            index
+            for was, now in zip(si_before[1:], si_after[1:])
+            for index, (a, b) in enumerate(zip(was.split(","), now.split(",")))
+            if a != b
+        }
+    )
+    si_headers = si_before[0].split(",")
+
+    mo.md(f"""
+    ```
+    was:  {si_before[1]}
+    now:  {si_after[1]}
+    ```
+
+    Fields that changed: **{[si_headers[i] for i in si_moved]}**
+
+    | | |
+    |---|---|
+    | line count unchanged | `{len(si_before) == len(si_after)}` |
+    | CRLF introduced | `{b"\r\n" in si_filled}` |
+    | header untouched | `{si_before[0] == si_after[0]}` |
+
+    Everything else — the `#` prefixes, `#07` with its leading zero, the
+    `/3` on a third attempt, the name — is copied through byte for byte.
+
+    The non-participant goes up as `Mark = 0`, `Grade = NG`, and **SI
+    accepts `NG`** — checked, not assumed. So no special case is needed
+    anywhere: what the departmental sheet says they got is what SI receives.
+    """)
+    return
+
+@app.cell
+def status_intro():
+    mo.md(
+        """
+        # Keeping status
+
+        Two halves, split by a single question: **can the code honestly
+        know?**
+
+        A step can tell that it produced a file. Whether that file was then
+        *sent*, *read* or *accepted* is in somebody's head and never on disk.
+        So each artefact has a flag the code sets and, where a person has to
+        do something with it, one beside it that only a person can set.
+
+        | the code sets, from evidence | a person sets |
+        |---|---|
+        | `departmental_sheet_written` | `sent_to_department` |
+        | `moderation_pack_built` | `moderated` (per assessment) |
+        | `si_file_written` | `si_submitted` |
+
+        **The evidence is the return value, not the absence of a crash.**
+        `distribute_feedback_sheets` completes perfectly happily having
+        matched nothing at all — forty folders, no ids recognised, no
+        exception. Ticking `sheets_distributed` off that puts a green mark
+        against a step that did nothing, which is this package's usual enemy
+        in a different hat.
+        """
+    )
+    return
+
+
+@app.cell
+def status_record_the_module_level_steps(
+    HANDLE, written, pack, si_results
+):
+    """MODULE LEADER -- and mostly not the module leader at all."""
+    # One call per artefact. `record` looks up the rule for the result's type
+    # and sets the flag only if the evidence supports it.
+    for module_evidence in (written, pack, si_results[0]):
+        HANDLE.record(module_evidence)
+
+    recorded_status = ModuleFile.load(ROOT).module.status
+
+    mo.md(f"""
+    ```
+    {recorded_status.model_dump()}
+    ```
+
+    The three automatic flags are set. The two manual ones are still `False`,
+    and correctly so: nothing on this machine can know the sheet reached the
+    department or that the upload was lodged with SI.
+    """)
+    return (recorded_status,)
+
+
+@app.cell
+def status_the_manual_half(HANDLE):
+    """MODULE LEADER -- the button, or this call from a notebook."""
+    # In the dashboard these two are buttons. Here they are the call a
+    # technical user makes.
+    HANDLE.set_module_status(sent_to_department=True)
+
+    mo.md(f"""
+    `{ModuleFile.load(ROOT).module.status.model_dump()}`
+
+    `si_submitted` is deliberately left alone — the upload has not been
+    lodged, and saying it had would be the one kind of lie this whole scheme
+    exists to prevent.
     """)
     return
 

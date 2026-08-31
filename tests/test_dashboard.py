@@ -23,7 +23,9 @@ House convention: ``pl`` is pathlib, ``pr`` is polars.
 
 import importlib.util
 import pathlib as pl
+import re
 import sys
+from dataclasses import dataclass
 
 import pytest
 
@@ -32,16 +34,32 @@ pytest.importorskip("marimo", reason="marimo is a dev dependency")
 from grader_helper.models import (  # noqa: E402 -- after the skip
     MODULE_FILENAME,
     FolderState,
+    ModuleFile,
     init_module,
     load_module,
 )
 
 
+@dataclass(frozen=True)
+class Ran:
+    """What one run of the notebook produced."""
+
+    #: Every name its cells defined.
+    names: dict
+
+    #: The page, as the rendered HTML of every cell output. Checked as well
+    #: as the names because a cell can define exactly the right values and
+    #: still render them wrongly -- mo.md dedents by the common leading
+    #: whitespace, so a multi-line value interpolated into an indented block
+    #: turns the headings after it into paragraphs, silently.
+    page: str
+
+
 @pytest.fixture
 def run_dashboard(monkeypatch, repo_root):
-    """Run every cell of the dashboard against a folder, and return its names."""
+    """Run every cell of the dashboard against a folder, and return what it made."""
 
-    def _run(folder: pl.Path) -> dict:
+    def _run(folder: pl.Path) -> Ran:
         monkeypatch.setenv("GRADER_HELPER_MODULE", str(folder))
         monkeypatch.chdir(repo_root)
         monkeypatch.syspath_prepend(str(repo_root))
@@ -64,8 +82,9 @@ def run_dashboard(monkeypatch, repo_root):
         notebook = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(notebook)
 
-        _, definitions = notebook.app.run()
-        return definitions
+        outputs, definitions = notebook.app.run()
+        page = "".join(getattr(output, "text", "") for output in outputs)
+        return Ran(names=definitions, page=page)
 
     return _run
 
@@ -82,9 +101,9 @@ def test_a_module_folder_is_displayed_not_offered_setup(run_dashboard, tmp_path)
 
     shown = run_dashboard(folder)
 
-    assert shown["loaded"]
-    assert not shown["offer"]
-    assert shown["found"].module.code == "PS4034"
+    assert shown.names["loaded"]
+    assert not shown.names["offer"]
+    assert shown.names["found"].module.code == "PS4034"
 
 
 def test_an_empty_folder_is_offered_setup(run_dashboard, tmp_path):
@@ -93,8 +112,8 @@ def test_an_empty_folder_is_offered_setup(run_dashboard, tmp_path):
 
     shown = run_dashboard(folder)
 
-    assert shown["offer"]
-    assert not shown["loaded"]
+    assert shown.names["offer"]
+    assert not shown.names["loaded"]
 
 
 def test_a_broken_module_file_is_offered_nothing(run_dashboard, tmp_path):
@@ -120,16 +139,16 @@ def test_a_broken_module_file_is_offered_nothing(run_dashboard, tmp_path):
     # notebook imports its own copy, and the enum member it holds is a
     # different object from this one. FolderState subclasses str precisely so
     # that comparing it by value still works.
-    assert shown["found"].state == FolderState.UNREADABLE
-    assert not shown["offer"]
-    assert not shown["loaded"]
+    assert shown.names["found"].state == FolderState.UNREADABLE
+    assert not shown.names["offer"]
+    assert not shown.names["loaded"]
 
 
 def test_a_folder_that_is_not_there_does_not_crash_the_page(run_dashboard, tmp_path):
     shown = run_dashboard(tmp_path / "no-such-module")
 
-    assert shown["found"].state == FolderState.MISSING
-    assert not shown["offer"]
+    assert shown.names["found"].state == FolderState.MISSING
+    assert not shown.names["offer"]
 
 
 # ---------------------------------------------------------------------------
@@ -151,10 +170,10 @@ def test_the_form_defaults_make_a_module_that_loads(run_dashboard, tmp_path):
 
     shown = run_dashboard(empty)
 
-    assert shown["weights"] == 100
+    assert shown.names["weights"] == 100
     init_module(
         empty, "PS4034", "Research Methods", "2025/26", "KOM",
-        assessments=shown["specs"],
+        assessments=shown.names["specs"],
     )
     written = load_module(empty)
 
@@ -174,7 +193,7 @@ def test_the_defaults_ask_for_no_collection_rules(run_dashboard, tmp_path):
 
     shown = run_dashboard(folder)
 
-    for spec in shown["specs"]:
+    for spec in shown.names["specs"]:
         assert not {"pass_mark", "free_passes"} & spec.keys(), spec
 
 
@@ -189,7 +208,7 @@ def test_the_rules_are_written_when_the_row_is_ticked(run_dashboard, tmp_path):
     folder = tmp_path / "PS4034"
     folder.mkdir()
 
-    spec_for = run_dashboard(folder)["assessment_spec"]
+    spec_for = run_dashboard(folder).names["assessment_spec"]
     row = dict(
         id="quizzes", type="quiz", name="Quizzes", marks_out_of=10, weight=10,
         pass_mark=80, free_passes=1,
@@ -207,7 +226,7 @@ def test_a_ticked_row_makes_a_module_that_collects_its_quizzes(run_dashboard, tm
     folder = tmp_path / "PS4034"
     folder.mkdir()
 
-    spec_for = run_dashboard(folder)["assessment_spec"]
+    spec_for = run_dashboard(folder).names["assessment_spec"]
     specs = [
         spec_for(dict(id="cw1", type="coursework", name="Coursework 1",
                       marks_out_of=100, weight=90, collected=False,
@@ -223,3 +242,55 @@ def test_a_ticked_row_makes_a_module_that_collects_its_quizzes(run_dashboard, tm
 
     assert (quizzes.pass_mark, quizzes.free_passes) == (80.0, 1)
     assert quizzes.raw_column == "Quizzes (10)"
+
+
+# ---------------------------------------------------------------------------
+# What the page actually renders
+# ---------------------------------------------------------------------------
+
+
+def test_the_module_page_has_its_sections(run_dashboard, tmp_path):
+    """Headings, not paragraphs that begin with hashes.
+
+    `mo.md` dedents a block by its common leading whitespace, so a
+    multi-line value interpolated at column zero into an indented block
+    leaves every following line over-indented -- and markdown then renders
+    the headings and tables as plain text. It fails silently and only in the
+    browser, which is why it is checked here.
+    """
+    folder = tmp_path / "PS4034"
+    folder.mkdir()
+    init_module(folder, "PS4034", "Research Methods", "2025/26", "KOM")
+
+    page = run_dashboard(folder).page
+
+    headings = re.findall(r"<h[23][^>]*>(.*?)</h[23]>", page)
+    assert headings == [
+        "PS4034 — Research Methods",
+        "Assessment",
+        "Progress",
+        "Produced once for the module",
+        "Files",
+    ]
+
+
+def test_written_is_shown_apart_from_sent(run_dashboard, tmp_path):
+    """The split the status model is built around.
+
+    The code can see that it wrote the departmental sheet. Whether the sheet
+    reached the department is in somebody's head, so the page must not let
+    the first stand for the second.
+    """
+    folder = tmp_path / "PS4034"
+    folder.mkdir()
+    init_module(folder, "PS4034", "Research Methods", "2025/26", "KOM")
+    handle = ModuleFile.load(folder)
+    handle.module.status.departmental_sheet_written = True
+    handle.save()
+
+    page = run_dashboard(folder).page
+    row = re.search(
+        r"<td>departmental sheet</td>\s*<td>(.*?)</td>\s*<td>(.*?)</td>", page
+    )
+
+    assert row.groups() == ("yes", "-")

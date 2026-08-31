@@ -21,7 +21,11 @@ from .models import (
 # ingesting
 from .ingesting.load_graders import load_graders
 from .ingesting.import_brightspace_classlist import import_brightspace_classlist
-from .ingesting.ingest_completed_graderfiles import ingest_completed_graderfiles
+from .ingesting.ingest_completed_graderfiles import (
+    Collation,
+    ingest_completed_graderfiles,
+    save_collated_grades,
+)
 from .ingesting.collect_quiz_marks import (
     DuplicateAttemptError,
     collect_quiz_marks,
@@ -50,16 +54,44 @@ from .dataframe_operations.prepare_data_for_departmental_template import (
 # collating -- the assembly layer, above the packages it reaches into
 from .collating import collate_module_marks
 
+# the student information system upload
+from .si_upload import (
+    SiUpload,
+    read_si_file,
+    student_id_from_key,
+    write_si_marks,
+)
+
+# moderation
+from .moderation import (
+    Pack,
+    Sample,
+    build_moderation_pack,
+    flag_borderline,
+    next_grade_up,
+    read_moderation_manifest,
+    sample_for_moderation,
+)
+
 # file operations
 from .file_operations.distribute_feedback_sheets import distribute_feedback_sheets
 from .file_operations.distribute_feedback_sheets import distribute_feedback_sheets_groups
 from .file_operations.alphabetise_folders import alphabetise_folders
-from .file_operations.save_distributed_graders import save_distributed_graders
+from .file_operations.save_distributed_graders import (
+    Allocation,
+    save_distributed_graders,
+)
 from .file_operations.save_grader_sheets import save_grader_sheets
 from .file_operations.extract_studentid_grade import extract_studentid_grade
 from .file_operations.catch_grades import catch_grades
 from .file_operations.brightspace_name_folders import brightspace_name_folders
 from .file_operations.scan_multiple_submissions import make_sub_date, scan_multiple_subs
+from .file_operations.departmental_layout import DepartmentalLayout
+from .file_operations.build_departmental_sheet import build_departmental_sheet
+from .file_operations.write_departmental_sheet import (
+    DepartmentalWrite,
+    write_departmental_sheet,
+)
 
 __all__ = [
     "Assessment",
@@ -78,6 +110,9 @@ __all__ = [
     "assign_graders_groups",
     "import_brightspace_classlist",
     "alphabetise_folders",
+    "Allocation",
+    "Collation",
+    "save_collated_grades",
     "save_distributed_graders",
     "save_grader_sheets",
     "ingest_completed_graderfiles",
@@ -96,8 +131,23 @@ __all__ = [
     "check_for_weighted_columns",
     "prepare_data_for_departmental_template",
     "collate_module_marks",
+    "Pack",
+    "Sample",
+    "build_moderation_pack",
+    "flag_borderline",
+    "next_grade_up",
+    "read_moderation_manifest",
+    "sample_for_moderation",
+    "SiUpload",
+    "read_si_file",
+    "student_id_from_key",
+    "write_si_marks",
     "brightspace_name_folders",
     "make_sub_date",
     "scan_multiple_subs",
-    "find_unsubmitted"
+    "find_unsubmitted",
+    "DepartmentalLayout",
+    "build_departmental_sheet",
+    "DepartmentalWrite",
+    "write_departmental_sheet",
 ]

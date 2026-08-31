@@ -132,3 +132,295 @@ def test_the_walkthrough_runs_and_collects_the_quizzes(walkthrough):
     assert {
         a.id: a.status.grades_collected for a in recorded.assessments
     } == {"cw1": True, "cw2": True, "quizzes": True}
+
+
+def test_the_walkthrough_writes_both_departmental_sheets(walkthrough):
+    """The two workbooks the notebook now ends with.
+
+    PS4001 is the template's own shape, so building it must give the
+    department's file back. PS4002 is the shape it has no room for, and is
+    the reason the builder exists -- so what is checked there is the two
+    things a module leader would otherwise have re-pointed by hand.
+    """
+    from openpyxl import load_workbook
+
+    template = load_workbook(walkthrough["TEMPLATE"])["GradeTemplate"]
+    first = load_workbook(walkthrough["sheet_path"])["GradeTemplate"]
+    second = load_workbook(walkthrough["sheet_2_path"])["GradeTemplate"]
+
+    def headers(sheet):
+        return [
+            sheet.cell(29, column).value
+            for column in range(1, sheet.max_column + 1)
+            if sheet.cell(29, column).value
+        ]
+
+    # PS4001 fits the template's shape -- two 100-mark pieces and a ten-mark
+    # one -- so its sheet is the department's own layout, column for column.
+    # Only the third assessment's *name* differs, because the walkthrough
+    # builds the module with weekly quizzes in the MCQ's slot.
+    assert len(headers(first)) == len(headers(template))
+    assert headers(first)[:6] == headers(template)[:6]
+    assert headers(first)[7:] == headers(template)[7:]
+    assert headers(first)[6] == "Quizzes (10)"
+    assert first["D30"].value == template["D30"].value
+    assert first["F30"].value == template["F30"].value
+    assert first["H30"].value == template["H30"].value
+    assert first["I30"].value == template["I30"].value
+    # ...with the marks in and the samples gone.
+    assert first["A30"].value != "Sample1"
+    assert first["C30"].value is not None
+
+    # PS4002 does not fit. Six assessment columns where the template has five,
+    # and the two MCQs are on different scales -- out of 100 and out of 10 --
+    # because both happen in practice.
+    assert headers(second) == [
+        "Name", "Student ID",
+        "Coursework 1 (100)", "Coursework 1 (30)",
+        "MCQ 1 (100)", "MCQ 1 (35)",
+        "MCQ 2 (10)", "MCQ 2 (35)",
+        "Total % Grade", "Letter Grade", "Comments",
+    ]
+
+    # One weighting scales down, the other scales up, and neither simplifies
+    # to a single divisor.
+    assert second["F30"].value == "=E30/100*35"
+    assert second["H30"].value == "=G30/10*35"
+
+    # Every assessment reaches the total -- the failure the builder exists to
+    # prevent is one of them quietly missing from it.
+    assert second["I30"].value == "=ROUND(SUM(D30,F30,H30),0)"
+
+    # The letter grade reads the total where it actually is, and the
+    # distribution reads the letter grade where it actually is.
+    assert second["J30"].value.startswith("=IF(ROUND(I30,2)>0,")
+    assert second["H6"].value == '=COUNTIF(J30:J530,"A1")'
+
+    # The descriptives cover every column, which is the A23 block the notes
+    # name as the thing that goes wrong by hand.
+    for column in range(3, 10):  # C..I: the assessment block plus the total
+        assert second.cell(23, column).value is not None, column
+        assert second.cell(25, column).value is not None, column
+    assert second.cell(23, 10).value is None, "nothing spills into Letter Grade"
+
+
+def test_the_second_module_totals_what_the_fixture_expects(walkthrough):
+    """PS4002's marks survive collation, weighting and banding.
+
+    The MCQs are handed in through `marks=` rather than read off disk, and
+    they are marked out of 10 while being worth 35 -- a scale-up, which is
+    the case that silently lost its weighted column before
+    `collate_module_marks` stopped inferring the column's name.
+    """
+    second = walkthrough["SECOND"]
+    sheet = walkthrough["module_2_sheet"].set_index("Student ID")
+    expected = second.expected.set_index("Student ID")
+
+    assert set(sheet.index) == set(expected.index)
+    assert sheet["Total % Grade"].to_dict() == expected["Total % Grade"].to_dict()
+    assert sheet["Letter Grade"].to_dict() == expected["Letter Grade"].to_dict()
+
+    # Both weighted columns exist: one scaling down, one scaling up.
+    assert sheet["MCQ 1 (35)"].to_dict() == (sheet["MCQ 1 (100)"] * 0.35).to_dict()
+    assert sheet["MCQ 2 (35)"].to_dict() == (sheet["MCQ 2 (10)"] * 3.5).to_dict()
+
+    # Joyce sat nothing and scored nothing, in this module as in the other.
+    assert sheet.loc["23304309", "Letter Grade"] == "NG"
+
+
+def test_the_third_module_collates_from_three_sources(walkthrough):
+    """PS4003's four assessments arrive three different ways, in one call.
+
+    The coursework is read off its feedback sheets, the quizzes out of
+    Brightspace's exports, and the MCQ and exam are handed in. Only the last
+    two are passed to `collate_module_marks`; the other two it has to find.
+    `collate_module_marks` chooses per assessment, by asking what each one
+    *has*, and a module with a single source is no evidence that it does.
+    """
+    third = walkthrough["THIRD"]
+    module = walkthrough["MODULE_3"]
+    marks = walkthrough["module_3_marks"].set_index("Student ID")
+    expected = third.expected.set_index("Student ID")
+
+    assert [a.id for a in module.assessments] == ["cw1", "quizzes", "mcq", "exam"]
+    assert len(third.quiz_exports["quizzes"]) == 10, "ten quizzes for ten marks"
+
+    # Ten quizzes and no free pass, so the mark is the number passed. PS4001
+    # sets eleven and forgives one; both are read off module.toml.
+    quizzes = module.assessment("quizzes")
+    assert (quizzes.marks_out_of, quizzes.free_passes) == (10, 0)
+    assert quizzes.weighted_column is None, "ten marks worth ten need no weighting"
+
+    # Neither of these was handed in.
+    assert marks["Coursework 1 (100)"].dropna().to_dict() == (
+        expected["cw1"].dropna().to_dict()
+    )
+    assert marks["Quizzes (10)"].to_dict() == expected["quizzes"].to_dict()
+
+    sheet = walkthrough["module_3_sheet"].set_index("Student ID")
+    assert sheet["Total % Grade"].to_dict() == expected["Total % Grade"].to_dict()
+    assert sheet["Letter Grade"].to_dict() == expected["Letter Grade"].to_dict()
+    assert sheet.loc["23304309", "Letter Grade"] == "NG"
+
+
+def test_the_third_module_sheet_carries_every_component(walkthrough):
+    """Seven assessment columns, and the raw one still reaches the total."""
+    from openpyxl import load_workbook
+
+    worksheet = load_workbook(walkthrough["sheet_3_path"])["GradeTemplate"]
+    headers = [
+        worksheet.cell(29, column).value
+        for column in range(1, worksheet.max_column + 1)
+        if worksheet.cell(29, column).value
+    ]
+
+    assert headers == [
+        "Name", "Student ID",
+        "Coursework 1 (100)", "Coursework 1 (30)",
+        "Quizzes (10)",
+        "MCQ (100)", "MCQ (20)",
+        "Exam (100)", "Exam (40)",
+        "Total % Grade", "Letter Grade", "Comments",
+    ]
+    # E30 is the quizzes' raw column and reaches the total directly, between
+    # two weighted ones.
+    assert worksheet["J30"].value == "=ROUND(SUM(D30,E30,G30,I30),0)"
+    assert worksheet["G30"].value == "=F30/5", "100 worth 20 divides exactly"
+    assert worksheet["K30"].value.startswith("=IF(ROUND(J30,2)>0,")
+    assert worksheet["H6"].value == '=COUNTIF(K30:K530,"A1")'
+
+
+def test_the_walkthrough_moderates_the_third_module(walkthrough):
+    """The pack the notebook builds, and the seed that justifies it.
+
+    The load-bearing assertion is the last one. A draw nobody can reproduce
+    cannot answer "why was this student moderated?", and the manifest is
+    what carries the answer.
+    """
+    moderation = walkthrough["moderation"]
+    pack = walkthrough["pack"]
+
+    # One per band, no non-participants, and the borderline cases as well.
+    bands = set(moderation.selected["Letter Grade"])
+    assert "NG" not in bands, "a student who submitted nothing has nothing to moderate"
+    assert bands, "the draw selected nobody"
+
+    reasons = " ".join(moderation.selected["Selected Because"])
+    assert "drawn" in reasons
+    assert "borderline" in reasons, "the notebook asks for borderline='include'"
+
+    # Only the coursework has anything to copy; the other three assessments
+    # have no submissions folder and are skipped rather than failing.
+    assert set(pack.copied) == {"cw1"}
+    assert pack.manifest.is_file()
+
+    from grader_helper import read_moderation_manifest, sample_for_moderation
+
+    manifest = read_moderation_manifest(pack.root)
+    assert len(manifest) == len(moderation.selected)
+    assert set(manifest["Seed"]) == {moderation.seed}
+
+    # And the recorded seed really does reproduce the draw.
+    again = sample_for_moderation(
+        walkthrough["module_3_sheet"],
+        n=1,
+        borderline="include",
+        seed=int(manifest["Seed"].iloc[0]),
+    )
+    assert again.selected["Student ID"].tolist() == (
+        moderation.selected["Student ID"].tolist()
+    )
+
+
+def test_a_moderation_pack_spans_every_marked_assessment(walkthrough):
+    """PS4001 has two marked courseworks, and both reach the moderator.
+
+    PS4003 has only one assessment with a download, so it cannot show this --
+    and a pack that quietly held one assessment's work when the module has two
+    would look complete. The junk a real download carries must not reach the
+    moderator either.
+    """
+    pack = walkthrough["ps4001_pack"]
+    sample = walkthrough["ps4001_sample"]
+
+    assert set(pack.copied) == {"cw1", "cw2"}, (
+        "both marked courseworks must be copied; the quizzes have no "
+        "submission folders and are rightly absent"
+    )
+    assert pack.copied["cw1"] == pack.copied["cw2"]
+
+    # Each band folder holds a sub-folder per assessment, named for it.
+    for _, student in sample.selected.iterrows():
+        band = pack.root / str(student["Letter Grade"])
+        assert band.is_dir()
+    assessments = {
+        path.name
+        for path in pack.root.rglob("*")
+        if path.is_dir() and path.parent.parent == pack.root
+    }
+    assert assessments == {"Coursework 1", "Coursework 2"}
+
+    # A band whose sampled student submitted nothing still appears, with a
+    # note saying so rather than as an empty folder or no folder at all.
+    for student, band in zip(
+        sample.selected["Student ID"], sample.selected["Letter Grade"]
+    ):
+        assert (pack.root / str(band)).is_dir(), f"band {band} missing from the pack"
+    unserved = {student for student, _ in pack.missing}
+    for student in unserved:
+        assert list(pack.root.rglob(f"NOTHING SUBMITTED - {student}.txt")), (
+            f"{student} was sampled, submitted nothing, and the pack does not say so"
+        )
+
+    # The fixture's download carries a __MACOSX folder and an index.html,
+    # which is what a real one looks like. Neither parses as a submission.
+    copied_folders = [
+        path.name
+        for path in pack.root.rglob("*")
+        if path.is_dir() and path.parent.name.startswith("Coursework")
+    ]
+    assert copied_folders, "nothing was copied at all"
+    assert not any("MACOSX" in name for name in copied_folders)
+    assert all(" - " in name for name in copied_folders)
+
+
+def test_the_walkthrough_writes_an_si_upload_for_every_module(walkthrough):
+    """All three modules, and each file changed only where it should be.
+
+    The notebook claims two fields moved and nothing else did. This checks
+    that claim on the bytes rather than on the notebook's own arithmetic.
+    """
+    import pathlib as pl
+
+    results = walkthrough["si_results"]
+    modules = [walkthrough[name] for name in ("MODULE", "MODULE_2", "MODULE_3")]
+    assert len(results) == len(modules) == 3
+
+    for module, result in zip(modules, results):
+        issued = pl.Path(module.si_file_path).read_bytes()
+        filled = result.path.read_bytes()
+
+        assert result.filled > 0, f"{module.code} got no marks written"
+        assert result.not_enrolled == [], f"{module.code} had unmatched students"
+        assert b"\r\n" not in filled, f"{module.code}: bare LF turned into CRLF"
+        assert filled.endswith(b"\n")
+        assert not filled.startswith(b"\xef\xbb\xbf")
+
+        before, after = issued.decode().splitlines(), filled.decode().splitlines()
+        assert len(before) == len(after), f"{module.code} gained or lost a line"
+        assert before[0] == after[0], f"{module.code}: the header was rewritten"
+
+        headers = before[0].split(",")
+        moved = {
+            index
+            for was, now in zip(before[1:], after[1:])
+            for index, (a, b) in enumerate(zip(was.split(","), now.split(",")))
+            if a != b
+        }
+        assert {headers[i] for i in moved} <= {"Mark", "Grade"}, (
+            f"{module.code} changed {[headers[i] for i in sorted(moved)]}"
+        )
+
+        # And the file SI issued is left where it was, untouched.
+        assert result.path != pl.Path(module.si_file_path)
+        assert pl.Path(module.si_file_path).read_bytes() == issued

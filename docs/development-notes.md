@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 400 tests:
+Done, 517 tests on Linux and 518 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -297,6 +297,9 @@ Done, 400 tests:
 - `init_module` writes a starter `module.toml`, comments and all, and
   creates the folders it describes
 - The assessment folder layout is modelled — see below
+- The departmental sheet is built for whatever assessments a module has,
+  and rebuilding the template's own shape reproduces it cell for cell — see
+  **Building the departmental sheet**
 - The four Excel-writing functions covered and repaired — see below
 - A whole fake module on disk, and an end-to-end test over it
 - Quiz collection: a folder of Brightspace quiz exports folded into one
@@ -432,10 +435,26 @@ Three things worth knowing about the form:
   which validates before it touches the disk, and its message is displayed.
   Nothing is written when it refuses.
 
-Verified by reintroducing four bugs and watching the right tests fail:
+**What the page shows for a loaded module** is its assessment, the columns
+each piece produces, per-assessment progress, and the module's own flags —
+written beside sent, kept apart, because the code can see that it wrote the
+departmental sheet and only a person knows whether it reached the
+department. See **Keeping status**.
+
+**One marimo trap, found here and worth knowing.** `mo.md` dedents a block
+by its common leading whitespace, so a multi-line value interpolated at
+column zero into an indented f-string sets that common indent to nothing and
+leaves every following line over-indented — and markdown renders the
+headings after it as paragraphs and the tables as text. It fails silently,
+and only in the browser. The summary is therefore built as a list of lines
+at column zero and joined, and the test asserts on the rendered HTML rather
+than on the values the cell defined.
+
+Verified by reintroducing six bugs and watching the right tests fail:
 treating an unreadable file as an empty folder (5 tests), `can_initialise`
 as "anything not loaded" (1), offering setup for anything that did not load
-(2), and inferring collection from the type (2).
+(2), inferring collection from the type (2), the indented-f-string dedent
+above (1), and showing *written* in the *sent* column (1).
 
 Not done here: rubrics, grade cells and graders are not in the form -- add
 them to `module.toml`, where its own comments explain them -- and the
@@ -449,33 +468,98 @@ assumes the one before it works.
 1. ~~**Quiz / MCQ collection**~~ — done. The rules are recorded in
    `module.toml`, and the walkthrough drives a term of quizzes end to end.
    See **Quiz collection**.
-2. **Write everything to the departmental grade file** — half done.
-   `collate_module_marks` brings a whole module's marks into one frame and
-   `prepare_data_for_departmental_template` puts them in the sheet's shape;
-   what is left is writing that into the department's actual workbook, which
-   needs the workbook. See **Collating a module**.
-3. **Moderation packs** — see **The domain → Moderation**. The internal
-   pack is the unit of work: a random sample of *n* per grade band, plus the
-   cases the ML flags for a second opinion. The external pack is an assembly
-   over the internal ones, so internal packs must be kept rather than
-   discarded. Two decisions first, both the ML's: what *n* is as a function
-   of cohort size, and what counts as a band. Nothing exists yet;
-   `Assessment.status.moderated` is the only hook.
-4. **Final marks for upload to SI** — whatever format the student
-   information system wants, which nothing in the package knows about yet.
+2. ~~**Write everything to the departmental grade file**~~ — done.
+   `build_departmental_sheet` lays the workbook out for whatever assessments
+   a module has and `write_departmental_sheet` puts the marks in. See
+   **Building the departmental sheet**.
+3. ~~**Moderation packs**~~ — the internal pack is done; the external one
+   is not. Both decisions were the ML's and both are made: *n* = 1 for now
+   (and never more than 2 or 3), and a band is a letter grade, A1 down to
+   NG. See **Moderation packs**. The external pack is an assembly over the
+   internal ones and is now possible, because each internal pack keeps its
+   manifest.
+4. ~~**Final marks for upload to SI**~~ — done. SI issues the file and we
+   fill in two columns of it. See **The SI upload**.
 5. ~~**Module initialisation as a workflow**~~ — done. A module leader
-   chooses how many assessments and fills in the two numbers for each,
-   rather than hand-editing `module.toml`. See **Pointing at a folder**.
-6. **Marimo dashboard** — started. `notebooks/module_dashboard.py` opens a
-   module or sets one up, and displays what is there. Still to come: running
-   the steps from it, and rolling a module forward into next year's folder
-   (`teaching/2026/Sem1/PS4034` from `teaching/2025/Sem1/PS4034`) --
-   assessment shape, weights, quiz rules and people copied, status flags
-   reset, marks dropped.
+   chooses how many pieces of assessment and fills in the two numbers for
+   each, rather than hand-editing `module.toml`. See **Pointing at a
+   folder**.
+6. **Marimo dashboard** — the front door is built and the steps are not.
+   `notebooks/module_dashboard.py` opens a module folder or sets one up and
+   shows what is there; running a step from it is the next chunk, and
+   **that** is where the scratch copy has to be designed. **Scope and open
+   questions are in `docs/dashboard-scope.md`**; start a session on the app
+   there rather than here. Two things were already decided there — it works
+   on a scratch copy and promotes to the real module folder, and it is built
+   for Kev first and hardened for a colleague second — and multi-module
+   discovery has since been answered: one folder at a time, chosen in the
+   browser, no stored list. See **Pointing at a folder**.
 
 **Polars migration** is unblocked but not scheduled: the Excel round-trip
 tests are the contract a port has to keep, and it can land whenever it stops
 being a distraction from the list above.
+
+#### PS4002, and why there are two modules in the walkthrough
+
+The notebook ends with two modules, not one. **PS4001** is the template's own
+shape and exists to walk the marking process; **PS4002** — one coursework
+worth 30 and two MCQs worth 35 each — exists to show the sheet builder doing
+the thing a module leader used to do by hand.
+
+It is deliberately much shorter. The marking pipeline is written out twice
+already, so PS4002 skips it: the coursework gets feedback sheets, and the two
+MCQs are "sat on paper" and handed in through `collate_module_marks(marks=)`,
+which is what that argument is for. Same cohort, same class list — the same
+students taking a second module.
+
+Its **two MCQs are on different scales on purpose**. An MCQ is sometimes
+graded out of 100 and then weighted, and sometimes graded out of however many
+questions it had; both happen, so the fixture carries one of each rather than
+the same case twice. MCQ 1 is out of 100 worth 35, MCQ 2 is out of 10 worth
+35, and the sheet holds `=E30/100*35` beside `=G30/10*35`.
+
+Keep an assessment there that is not marked out of 100. Every other one in
+the project is out of 100 or on its own weight, so nothing had ever scaled
+*up* — and the scale-up is what found the collation bug above on its first
+run.
+
+#### PS4003, and the three sources
+
+**PS4003** — coursework, weekly quizzes, an MCQ and an exam — is the third
+module in the walkthrough, and it is there for a different reason from
+PS4002. PS4002 is about the *sheet*: a block the template has no room for.
+PS4003 is about the *collation*.
+
+Its four assessments arrive by three routes in a single call:
+
+| | comes from | read by |
+|---|---|---|
+| Coursework 1 | feedback sheets in the download | `catch_grades` |
+| Quizzes | Brightspace's own exports | `collect_quiz_marks` |
+| MCQ, Exam | marked on paper | handed in via `marks=` |
+
+PS4001 covers the first two and PS4002 the first and third. Nothing had put
+all three in one module, so nothing showed that `collate_module_marks`
+chooses **per assessment** — by asking what each one *has* — rather than per
+module. `test_one_collation_reads_three_different_sources` is the guard, and
+it names which route broke rather than failing somewhere downstream.
+
+Two shapes it adds to the sheet, both of which the earlier modules lack:
+
+- **A raw column in the middle of the block.** Ten quiz marks worth ten need
+  no weighted column, so `E30` reaches the total directly while `D30`, `G30`
+  and `I30` reach it through theirs: `=ROUND(SUM(D30,E30,G30,I30),0)`. Summing
+  only the weighted columns drops it; summing every column double-counts the
+  marks that were weighted. Both are easy hand-edits and both give a
+  plausible number.
+- **The exact-divisor weighting in the wild.** The MCQ is 100 marks worth 20,
+  and 100/20 is 5, so it gets `=F30/5` while the coursework and exam get
+  `/100*30` and `/100*40`. One module, both forms.
+
+Its quizzes are **ten for ten marks with no free pass**, so a mark is simply
+the number passed. PS4001 sets eleven for ten and forgives one. Keeping both
+is deliberate: the rules are read off the assessment in `module.toml`, and a
+fixture that only ever showed one set of them would not prove that.
 
 #### A note on the walkthrough notebook
 
@@ -646,6 +730,30 @@ entirely, in a step the reader was not thinking about. Two fixes, both kept:
 a `grade_cell` now settles it before the folder is looked at, and the export
 check ignores the files this package itself writes there.
 
+#### The weighted column has to be named by the assessment
+
+`collate_module_marks` used to weight through `calculate_weighted_score`,
+which infers the new column's name by multiplying the fraction by 100. That
+is the weight only when the piece is marked out of 100. Out of 50 and worth
+25 it produces `(50)` — the raw column's own name, which it then refuses to
+overwrite — and out of 10 and worth 35 it produces `(350)`.
+
+It reports both by *returning* a string, and the return value was being
+discarded. So the weighted column silently never appeared, and the failure
+surfaced two steps later as `prepare_data_for_departmental_template`
+complaining about a column it had been given no way to create. A component
+quietly absent from every total is the exact failure this package exists to
+prevent, and it was hiding in the code that assembles the totals.
+
+It stayed invisible because every assessment in the fixtures was marked out
+of 100, except the MCQ — which is worth what it is marked out of and so needs
+no weighted column at all. PS4002 in the walkthrough is the first assessment
+that scales *up* (10 marks worth 35), and it found this immediately.
+
+The collation now takes the name from `Assessment.weighted_column` and does
+the multiplication itself. `calculate_weighted_score` is unchanged and still
+correct for the out-of-100 case it was written for.
+
 #### The two records, and why there is no fallback
 
 A marked coursework exists in two places and they mean different things:
@@ -728,6 +836,391 @@ column by matching `raw_column` against row 29, writes the raw marks there,
 and refuses — naming the column — when the module has an assessment the
 template has no home for. A module that fits is written; one that does not
 is told so, rather than being half-written.
+
+That is `write_departmental_sheet`. The half it does not solve — a module
+that does not fit — is `build_departmental_sheet`, which makes the home. See
+**Building the departmental sheet**.
+
+### Building the departmental sheet
+
+The template is one module's shape, so any other shape has been reshaped by
+hand — and that is where the marks go wrong. The two places a hand edit fails
+are not random; they are the only two things that move when the assessment
+block changes width:
+
+* the **descriptives at A23** — Mean, SD and N, one formula per column. Add an
+  assessment and the summary needs three more cells that nothing reminds you
+  about. A mean over six of seven components is a perfectly plausible number.
+* the **Letter Grade column and the distribution that reads it** — a nested
+  `IF` ten levels deep, plus eleven `COUNTIF`s pointing at it. Miss one and
+  the distribution reports the cohort as NG.
+
+`build_departmental_sheet(module, template, destination)` lays the block out
+for whatever assessments the module has and re-points everything downstream.
+`write_departmental_sheet(df, module, workbook)` then writes Name, Student ID
+and the raw marks into it — five values a row for the template's shape,
+nothing else.
+
+**It writes formulas, never values.** The weighting, the total, the letter
+grade, the descriptives and the distribution all go in as Excel formulas
+transcribed from the template's own. The sheet still does its own arithmetic
+off its own band table, so it stays the thing our numbers are *checked
+against* rather than a transcript of them. Nothing outside `GradeTemplate` is
+touched, and inside it the band table at A5:E17 and the QPV column are read
+but never written.
+
+#### The guard: rebuild the template and require it back
+
+`tests/test_departmental_sheet.py::test_rebuilds_the_committed_template` gives
+the builder a module of the template's own shape — cw1 100/40, cw2 100/50, MCQ
+10/10 — and asserts the committed template comes back cell for cell: headers,
+every formula in the ruled rows, the descriptives, the distribution and the
+number formats. The only permitted difference is the cleared sample rows.
+
+That is what makes the shapes nobody has a golden copy of trustworthy. The
+letter-grade formula in particular is *generated from the band table in the
+workbook being written*, rows 8–17, so it reproduces the department's string
+exactly and follows them if they retire a band.
+
+#### Two things read off the file that contradicted the obvious choice
+
+**The weighting must divide exactly where it can.** The template writes
+`=C30/100*40` for cw1 and the hand-simplified `=E30/2` for cw2, and the tidier
+thing to do is to write both the long way so the weight is visible in the
+cell. That is wrong, and not cosmetically. `x/2` is exact in binary floating
+point; `x/100*50` is two roundings and is not — they differ by up to 1.4e-14.
+The total is `ROUND(SUM(...),0)`, so a sum landing on an exact half falls the
+other way: at cw2 = 29 the two forms give 14.5 and 14.499999999999998, which
+Excel rounds to **15 and 14**. Thirteen such disagreements exist on a
+half-point mark grid. So: divide by a whole number where the weight goes into
+the marks exactly, and use `/marks_out_of*weight` otherwise. On the template's
+shape that gives the department's two formulas back, character for character.
+`test_the_long_weighting_form_would_have_moved_marks` keeps the evidence.
+
+**Body styling comes from a blank row, not row 30.** The template formats its
+sample rows 30–49 with a number format of `0` and the 481 untouched rows below
+them with `0.00`. The samples are the odd ones out and wrongly so: `E30` holds
+`66.5` and a format of `0` displays it as **67**. Styling is taken from the
+first ruled row the department left empty. Some sample rows also carry a
+highlight fill, which on a real student would read as a flag from the module
+leader.
+
+#### Two templates are in circulation, and they grade 100 differently
+
+Found by comparing a working copy against the committed one. They differ by
+**one character, in one cell** (filled down 501 rows), in the letter-grade
+formula:
+
+```
+committed:  ...ROUND(H30,2)<=$B$17),"A1","NG")
+the other:  ...ROUND(H30,2)< $B$17),"A1","NG")
+```
+
+`$B$17` is 100. Every band but the last is closed by the band above it; A1
+has nothing above it, so it has to close with `<=`. With `<`, a total of
+exactly 100 matches no band and falls through the whole nested `IF` to the
+final `"NG"` — **a student with full marks recorded as no participation.**
+
+The committed copy is the correct one: it agrees with the band table beside
+it, which gives A1 an upper bound of 100, and with `make_letter_grade`. The
+golden samples top out at 75, which is why nothing had ever exercised the
+boundary.
+
+`build_departmental_sheet` **refuses** a template with the `<` form rather
+than correcting it. It regenerates the formula, so it would otherwise emit
+the right one silently and overrule the department's file without saying so
+— and a package that substitutes its own arithmetic quietly is what every
+other guard here exists to prevent. The refusal names the cell and the
+one-character fix.
+
+Worth knowing which copy the department actually issues. If it is the `<`
+one, that is a live defect in their file rather than something to work
+around.
+
+#### The N row, which looks like a mistake and is not
+
+Row 25 counts the *raw* column in every case: `D25` is `COUNT(C30:C530)`, not
+`COUNT(D30:D530)`. That is deliberate — the weighting formula sits in all 501
+rows, so counting it returns 501 whatever the cohort. `H25` counting `G`
+follows from the same fill and has the same effect. The rule that reproduces
+the template exactly is *the nearest raw column at or before this one*, and it
+is also the honest one: N means "students with a mark", and only a raw column
+knows that.
+
+#### What it refuses
+
+All four refusals guard one failure — a total quietly missing a component,
+which looks exactly like a real mark:
+
+- an assessment the sheet has no column for, named rather than dropped;
+- a column the sheet totals that the module does not account for, because left
+  empty it contributes zero to every student;
+- a cohort larger than the 501 ruled rows, because row 531 is outside every
+  formula on the sheet;
+- an existing destination, unless `overwrite=True`.
+
+Ten of these guards were verified by reintroducing the bug — dropping an
+assessment from the total, pointing N at a formula column, freezing the
+distribution on column I, skipping the clear, writing ids as numbers — and
+watching the test fail.
+
+### Keeping status
+
+Two halves, split by one question: **can the code honestly know?**
+
+A step can tell that it produced a file. Whether that file was then *sent*,
+*read* or *accepted* is in somebody's head and never on disk. So each artefact
+has a flag the code sets and, where a person has to do something with it, one
+beside it that only a person can set.
+
+| the code sets, from evidence | a person sets |
+|---|---|
+| `departmental_sheet_written` | `sent_to_department` |
+| `moderation_pack_built` | `moderated` (per assessment) |
+| `si_file_written` | `si_submitted` |
+| `sheets_distributed` | |
+
+That rule is why `build_moderation_pack` never set `moderated`: a pack
+existing is not a pack having been read.
+
+#### "It did not raise" is not evidence
+
+The tempting rule is *set the flag when the code runs without crashing*. It is
+wrong here, and this package supplies its own counter-examples:
+
+* `distribute_feedback_sheets` returns a `Distribution` that can be entirely
+  `unmatched` — forty folders, no ids recognised, no exception.
+* `collate_module_marks` *warns* for an assessment it found no marks for.
+* `ingest_completed_graderfiles(require_all=False)` warns rather than raises.
+
+A green tick against a step that did nothing looks exactly like a real one —
+the same failure as a total missing a component. So the flag comes from the
+**return value**. `grader_helper/recording.py` holds one rule per result type:
+
+| result | flag | evidence |
+|---|---|---|
+| `Allocation` | `graders_allocated` | `distributed.xlsx` holds students |
+| `Distribution` | `sheets_distributed` | something copied or skipped, and nothing unmatched |
+| `Collation` | `grades_collected` | `completed_grades` holds students |
+| `DepartmentalWrite` | `departmental_sheet_written` | rows written |
+| `Pack` | `moderation_pack_built` | the manifest exists |
+| `SiUpload` | `si_file_written` | marks filled, and SI's roll fully accounted for |
+
+**The artefact is the evidence.** Every rule reads the file the step produced:
+`distributed.xlsx` existing is what says the graders were allocated,
+`completed_grades` that the marks came back, `moderation_sample.csv` that a
+pack was drawn. Existence alone is not enough, though -- an empty
+`distributed.xlsx` is not an allocation -- so each rule also asks how many
+students are in it.
+
+`ModuleFile.record(result, assessment_id=None)` looks the rule up and sets the
+flag only if the evidence supports it. A result that falls short leaves the
+status alone without complaint — a half-finished step is a normal state of
+affairs. A result **nothing** has a rule for is refused, because setting a
+flag on no evidence is worse than not setting one.
+
+Adding a step means adding a line to `RULES` and nothing else. The library
+functions stay pure and path-based; they never learn about `ModuleFile`.
+
+Three functions gained evidence-carrying returns so their artefact could be
+read:
+
+* **`write_departmental_sheet` returns a `DepartmentalWrite`**, not a bare
+  path. A path said the function had run; it did not say whether anything
+  reached the sheet, so there was no evidence to read.
+* **`save_distributed_graders` returns an `Allocation`** for the same reason.
+* **`save_collated_grades` is new**, split out of
+  `ingest_completed_graderfiles` so writing `completed_grades` has a function
+  that reports what went into it. `ingest_completed_graderfiles(save=True)`
+  calls it, so there is still one definition of what that file is and where it
+  goes, and its own return is unchanged -- callers still get the frame.
+
+**The rules live one layer up**, in `recording.py`, because they import
+`file_operations`, `ingesting` and `moderation`, and those import `models`.
+`ModuleFile.record` imports the registry inside the method, which keeps the
+layering honest without a cycle.
+
+#### `[module_status]`, and the bug writing it caused
+
+Module-level status is its own table, **not** `[status.module]`: `[status]` is
+keyed by assessment id, and an assessment legitimately called `module` would
+collide with it.
+
+Reading it back is order-dependent, and getting that wrong ate data. Both
+`[status]` and `[module_status]` land on a model field called `status`, and
+the first version set the module's *before* popping the assessments' —
+silently wiping every assessment flag in the file. `[status]` is popped first
+now, and `test_module_status_and_assessment_status_do_not_clobber_each_other`
+is the guard.
+
+#### What is left manual, and why
+
+Only `moderated` and the two module-level ones. Every other flag now comes
+from an artefact, and `test_every_assessment_flag_can_now_be_recorded` says so
+— it fails if a new assessment flag appears with nothing to justify it.
+
+`moderated`, `sent_to_department` and `si_submitted` are manual because
+nothing on disk can settle them: a pack existing is not a pack having been
+read, and a file written is not a file sent.
+
+### The SI upload
+
+SI **issues** a file — one row per enrolled student, `Mark`, `Grade` and a
+bare `CD` blank — and the module leader sends the same file back. So this is
+the departmental sheet's problem again: *fill in two fields of somebody
+else's file and change nothing else*, not *produce a file in SI's format*.
+
+`write_si_marks(df, si_file, destination=None)` does it;
+`paths.si_file` in `module.toml` records where SI's file is.
+
+Read off a real file at byte level (counts and the header only — no student
+data left the machine):
+
+| | |
+|---|---|
+| encoding | UTF-8, **no BOM**, trailing newline |
+| line endings | **bare LF**, zero CRLF — on a file Windows produced |
+| quoting | none anywhere; no field holds a comma |
+| columns (13) | `Year, Period, #Module, Occ, #Map, #Ass#, #SPR_Code, Name, #CD, Mark, Grade, CD, #Cand Key` |
+| `#SPR_Code` | `#<student id>/<attempt>` — attempt = times taken |
+| `Name` | `KEVIN O'MALLEY` — upper case, apostrophes, no surname comma |
+| `#CD` | two digits, leading zero significant (`#07`) |
+| `Mark` | an integer literal; `Grade` a band letter |
+
+**The bare LF is the one that bites.** Python's `open(path, "w")` turns `\n`
+into `\r\n` on Windows, so writing the file back the obvious way changes
+*every line in it* — forty lines rewritten by a function asked to change two
+fields. Bytes are read and written, with whatever terminator the file already
+had. Linux CI would never catch this by accident, because there a text write
+produces LF anyway, so the test asserts on bytes.
+
+**SI accepts `NG`** — confirmed by the module leader, not assumed. A
+non-participant goes up as `Mark = 0`, `Grade = NG`, which is exactly what
+the departmental sheet says they got, so no special case is needed anywhere
+in the chain.
+
+`#SPR_Code` and `#Cand Key` are **matched on and never rebuilt**. The attempt
+number is SI's and nothing we hold could reproduce it, so a writer that
+reconstructed the key would get every resitting student wrong and nobody
+else.
+
+#### Two faults in the scratch version this replaces
+
+The working version was a marimo notebook doing `pr.scan_csv` →
+`write_csv`, which re-emits the file as polars thinks a CSV should look. Both
+faults are of the usual kind — a plausible result rather than an error:
+
+- **It blanked marks.** `with_columns(pr.col("Mark_right").alias("Mark"))`
+  replaced `Mark` unconditionally, so any SI row unmatched in the grades
+  frame got `Mark = null`. Harmless the first time, because the column is
+  empty anyway; on a re-run against a partial frame it overwrites real marks
+  with nothing. A student on SI's roll with no mark is now **refused** and
+  named, with `allow_unmarked=True` as the explicit way through.
+- **`how="full"` invented rows.** A student in the grades file but not in
+  SI's got appended with a null `#SPR_Code`. SI's roll decides the cohort, so
+  they are reported in `not_enrolled` and never added.
+
+Nine guards in `tests/test_si_upload.py`, each checked by reintroducing the
+bug: writing as text, blanking an unmatched mark, skipping the refusal,
+putting the id through an int, writing `70.0`, rebuilding the attempt number,
+accepting a quoted file, accepting a short row, and appending the
+un-enrolled.
+
+#### The fixture has to play SI
+
+Nothing generates one of these for real, so `write_si_export` in
+`tests/fake_module.py` writes the blank file SI would issue — LF endings, no
+BOM, the `#` prefixes, a `#CD` with a leading zero, and two students on
+second and third attempts. PS4001, PS4002 and PS4003 each get one, and the
+walkthrough fills all three.
+
+### Moderation packs
+
+Who gets a second opinion, and the folders the second marker is handed.
+Three pieces in `grader_helper/moderation/`, in the order they run:
+
+| | |
+|---|---|
+| `flag_borderline` | who is within a point of the next grade up |
+| `sample_for_moderation` | the draw — *n* per band, plus requested, plus borderline if asked |
+| `build_moderation_pack` | the folders, and the manifest saying what is in them and why |
+
+The decisions were the module leader's and are recorded here so they are not
+re-litigated: **n = 1**, and never expected above 2 or 3; **a band is a letter
+grade**, A1 down to NG.
+
+#### Borderline, and why it may replace the ratio
+
+A total of 69 is a B2 and 70 is a B1 — one mark apart, and a different
+classification on a transcript. If a hand-marked component is wrong anywhere,
+it costs the student most there. The department is discussing moderating on
+that basis *instead of* a random sample per band, so borderline students are
+computed whatever else happens and `sample_for_moderation(borderline=...)`
+takes `"flag"` (the default, today's practice), `"include"` (take them all)
+or `"ignore"`.
+
+**The distance is measured from the rounded total**, because that is the mark
+of record: the sheet computes `ROUND(SUM(...),0)` and bands *that*, so a
+student whose exact total is 69.6 already has 70 and is already a B1.
+Measuring from the unrounded figure would flag people who are not near a
+boundary and miss people who are.
+
+The top band and NG never have a next grade, so neither is ever borderline.
+
+#### The seed is the point
+
+A random sample that comes out different every run is not a sample. Nobody
+can answer "why was this student moderated?" six months later, and re-running
+quietly changes the answer.
+
+So every draw carries the seed that produced it, `sample_for_moderation`
+generates one when not given it and **returns it**, and the seed goes into
+`moderation_sample.csv` beside the pack along with who was selected, from
+which band, on what mark, and why. Given the marks and the seed anyone can
+reproduce the selection exactly — there is a test that does.
+
+That manifest is also the handoff to the external pack, the same way
+`folder_rename_log.csv` is the handoff to `brightspace_name_folders`. The
+folders can be rebuilt from it; without it they cannot.
+
+#### Three bugs the prototype had, all now guarded
+
+The working version of this was a marimo notebook, and its faults were
+instructive rather than careless — every one is the kind that produces a
+plausible result:
+
+- **`if id in f.stem`** matched the student id anywhere in the folder name,
+  so `2330430` gets `23304301`'s work. The wrong student's submission in a
+  moderation pack is worse than none. Folder names are now *parsed*, with
+  `parse_brightspace_folder`.
+- **No seed, plus `dirs_exist_ok=True`, plus no record.** Run it twice and a
+  different student per band is copied in alongside the first, with nothing
+  saying which draw was real. A pack is now refused rather than merged into,
+  and `overwrite=True` replaces it outright.
+- **NG was sampled.** A non-participant has no submission folder, so the copy
+  found nothing and left an empty band directory — which reads as work the
+  moderator has already been through. NG is excluded, and a selected student
+  with nothing submitted is *named* in `pack.missing` and the manifest.
+
+A fourth, found by asking why the walkthrough built no pack for PS4001: a
+sampled band whose student submitted nothing **never appeared in the pack at
+all**, because the band folder was only ever created as a side effect of
+copying work into it. That is the empty-folder problem inverted — an empty
+folder reads as work already moderated, and a *missing* folder reads as a band
+nobody sampled. Every sampled band now gets a folder, and one with nothing in
+it carries a note saying which of the two it is.
+
+Fourteen guards in `tests/test_moderation.py`, each checked by reintroducing
+the bug it catches. One of them was a bad test first: `every sampled band gets
+a folder` kept the whole cohort, so another student in the same band had work
+and `copytree` made the folder anyway — it passed against a build with the fix
+removed. Narrowing the frame to the one student is what turned it into a test.
+
+**PS4001 is the only fixture where a pack spans two assessments**, because it
+is the only module with two marked courseworks. PS4003 has one, so its test
+asserts `copied == {"cw1"}` and cannot catch a pack that quietly holds one
+assessment's work when the module has two. The walkthrough moderates PS4001 as
+well for exactly that reason.
 
 ### The Excel round trip
 
@@ -977,9 +1470,12 @@ Two things the walkthrough surfaced, neither a bug:
   `brightspace_name_folders` through `folder_rename_log.csv` rather than
   through a value. Worth knowing before looking for a return value that is
   not there.
-- **No moderation pack.** `Assessment.status.moderated` and
-  `Module.internal_moderator` exist, but nothing samples submissions or
-  stratifies them by letter grade. A feature to build, not a gap to cover.
+- **No external examiner pack.** The internal pack is built and keeps its
+  manifest, which is what an external pack has to be assembled over — but
+  nothing assembles one yet. `Assessment.status.moderated` is still not set
+  by anything either; `build_moderation_pack` writes the manifest but does
+  not mark the assessment moderated, because a pack having been *built* is
+  not the same as it having been *read*.
 - **The repo-root shim covers the public API but not submodules.** The repo
   directory is itself called `grader_helper`, so with its parent on
   `sys.path` an `import grader_helper` finds `./__init__.py`, which
@@ -990,6 +1486,47 @@ Two things the walkthrough surfaced, neither a bug:
   path for. It bit `test_walkthrough.py`, which works around it by dropping
   the stale binding; `test_import.py` does not catch it because it checks in
   a subprocess. Giving the shim a `__path__` would close it properly.
+- **A blank mark is a zero to the sheet.** Excel's `SUM` reads an empty cell
+  as nothing, so a student with one component unmarked gets a total as though
+  they had scored nil on it, and a letter grade computed from that. This is
+  the department's arithmetic, not ours, and it is not ours to change — but it
+  means a sheet written before all the marking is in reads as a complete set
+  of low grades. `write_departmental_sheet` leaves a missing mark blank rather
+  than writing 0, so at least the empty cell is visible.
+- **The Excel check now passes, and left one piece of noise behind.**
+  `test_excel_computes_what_we_compute` had only ever been skipped. Run on
+  Windows against a real Excel it passes: **413 passed, nothing skipped**.
+  Excel's `Total % Grade` and `Letter Grade` agree with
+  `prepare_data_for_departmental_template` on a generated sheet, so the
+  formulas the builder emits compute what we compute — not merely what
+  openpyxl can see, which is all every other test in that file can check.
+  Linux still reports 412 passed and 1 skipped.
+
+  Two pieces of console noise it does not mean anything by. The
+  `Reading feedback: 100%|...| 11/11` lines are `tqdm` progress bars from
+  `catch_grades`, which write to stderr. And openpyxl warns `Unknown
+  extension is not supported and will be removed` on every read of the
+  template: the extension is `mx:PLV`, Excel for Mac's **page-layout view
+  preference**, recorded by whoever last had the file open on a Mac. It is a
+  view setting, not data or a formula, so dropping it costs nothing.
+
+  Reading that XML did turn up something worth covering, though. The SD row
+  is stored as a dynamic-array formula (`<f t="array" ref="C24">` around
+  `_xlfn.STDEV.S` over `_xlfn._xlws.FILTER`), the builder regenerates it, and
+  openpyxl can only confirm the *text* is right. Whether Excel still
+  evaluates it in a rebuilt file rather than showing `#NAME?` is only
+  answerable with Excel, so `test_excel_computes_what_we_compute` now checks
+  the Mean, SD and N as well as the total and the letter grade.
+
+  The run prints `Windows fatal exception: code 0x800706ba`
+  (`RPC_S_SERVER_UNAVAILABLE`) with two thread dumps, and then passes. It is
+  COM teardown: `app.quit()` ends Excel, a lingering proxy is touched
+  afterwards, and pytest's `faulthandler` dumps the SEH exception before it
+  is handled normally. Cosmetic, but it reads like a crash. Not quietened,
+  because no machine here has Excel to tell a real fix from one that merely
+  moves the noise. It stops being cosmetic if stray `EXCEL.EXE` processes
+  start accumulating; `app.kill()` after `quit()` and `add_book=False` are
+  the things to try then.
 - A `.pyc` is tracked despite `.gitignore` listing `__pycache__/`. Ignore
   rules do not apply to already-tracked files: `git rm --cached` it.
 

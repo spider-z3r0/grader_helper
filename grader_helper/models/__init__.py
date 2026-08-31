@@ -8,8 +8,15 @@ from .assessment import (
     Assessment,
     AssessmentStatus,
     AssessmentType,
+    tidy_number,
 )
-from .module import SCHEMA_VERSION, WEIGHT_TOLERANCE, Module, ModulePaths
+from .module import (
+    SCHEMA_VERSION,
+    WEIGHT_TOLERANCE,
+    Module,
+    ModulePaths,
+    ModuleStatus,
+)
 from .module_file import (
     MODULE_FILENAME,
     STARTER_ASSESSMENTS,
@@ -30,6 +37,7 @@ __all__ = [
     "ModuleFile",
     "ModuleFolder",
     "ModulePaths",
+    "ModuleStatus",
     "MODULE_FILENAME",
     "init_module",
     "inspect_module_folder",
@@ -39,4 +47,5 @@ __all__ = [
     "STARTER_ASSESSMENTS",
     "WEIGHT_TOLERANCE",
     "as_person",
+    "tidy_number",
 ]

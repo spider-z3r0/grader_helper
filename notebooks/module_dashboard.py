@@ -148,54 +148,87 @@ def the_module(found, loaded):
         return "yes" if flag else "-"
 
     def _summarise(module):
-        assessments = "\n".join(
+        # Built as a list of lines at column zero, then joined, rather than as
+        # one indented f-string. mo.md dedents by the common leading
+        # whitespace, so a multi-line value interpolated into an indented
+        # block sets that common indent to nothing and leaves every other
+        # line over-indented -- which silently turns the headings into
+        # paragraphs and the tables into text.
+        lines = [
+            f"## {module.code} — {module.name}",
+            "",
+            f"{module.year}. Led by `{module.leader}`, moderated by "
+            f"`{module.internal_moderator or 'not set'}`.",
+            "",
+            "### Assessment",
+            "",
+            "| id | type | name | out of | weight | grade sheet columns |",
+            "|---|---|---|---|---|---|",
+        ]
+        lines += [
             f"| `{a.id}` | {a.type.value} | {a.name} | {a.marks_out_of} | "
             f"{a.weight} | {', '.join(a.columns)} |"
             for a in module.assessments
-        )
-        progress = "\n".join(
+        ]
+        lines += [
+            "",
+            f"Weights sum to **{sum(a.weight for a in module.assessments)}**.",
+            "",
+            "### Progress",
+            "",
+            "| id | allocated | distributed | collected | moderated |",
+            "|---|---|---|---|---|",
+        ]
+        lines += [
             f"| `{a.id}` | {_tick(a.status.graders_allocated)} | "
             f"{_tick(a.status.sheets_distributed)} | "
             f"{_tick(a.status.grades_collected)} | {_tick(a.status.moderated)} |"
             for a in module.assessments
-        )
+        ]
+
+        # The module's own flags, not an assessment's: the things produced
+        # once for the whole module. Each artefact the code can see for
+        # itself is shown beside the flag saying a person did something with
+        # it -- written is not sent, and only a person knows the second.
+        lines += [
+            "",
+            "### Produced once for the module",
+            "",
+            "| | written | sent |",
+            "|---|---|---|",
+        ]
+        lines += [
+            f"| {label} | {_tick(automatic)} | "
+            f"{_tick(manual) if manual is not None else 'n/a'} |"
+            for label, automatic, manual in (
+                (
+                    "departmental sheet",
+                    module.status.departmental_sheet_written,
+                    module.status.sent_to_department,
+                ),
+                ("moderation pack", module.status.moderation_pack_built, None),
+                ("SI upload", module.status.si_file_written, module.status.si_submitted),
+            )
+        ]
+
         missing = [d for d in module.directories if not d.exists()]
+        lines += [
+            "",
+            "### Files",
+            "",
+            "| | |",
+            "|---|---|",
+            f"| root | `{module.root}` |",
+            f"| assessments | `{module.assessments_dir}` |",
+            f"| class list | `{module.classlist_path or 'not set'}` |",
+            f"| departmental sheet | `{module.departmental_sheet_path or 'not set'}` |",
+            "",
+            "All the folders it describes exist."
+            if not missing
+            else "**Missing folders:** " + ", ".join(f"`{d}`" for d in missing),
+        ]
 
-        return mo.md(
-            f"""
-            ## {module.code} — {module.name}
-
-            {module.year}. Led by `{module.leader}`, moderated by
-            `{module.internal_moderator or "not set"}`.
-
-            ### Assessment
-
-            | id | type | name | out of | weight | grade sheet columns |
-            |---|---|---|---|---|---|
-            {assessments}
-
-            Weights sum to **{sum(a.weight for a in module.assessments)}**.
-
-            ### Progress
-
-            | id | allocated | distributed | collected | moderated |
-            |---|---|---|---|---|
-            {progress}
-
-            ### Files
-
-            | | |
-            |---|---|
-            | root | `{module.root}` |
-            | assessments | `{module.assessments_dir}` |
-            | class list | `{module.classlist_path or "not set"}` |
-            | departmental sheet | `{module.departmental_sheet_path or "not set"}` |
-
-            {"All the folders it describes exist."
-             if not missing else
-             "**Missing folders:** " + ", ".join(f"`{d}`" for d in missing)}
-            """
-        )
+        return mo.md("\n".join(lines))
 
     view = _summarise(found.module) if loaded else mo.md("")
     view

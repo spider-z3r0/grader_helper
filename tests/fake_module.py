@@ -105,6 +105,177 @@ COHORT = (
     ("23304311", "Liam",   "Lynch",    55, 60, 5),   # never submits
 )
 
+#: A second module, whose shape the departmental template has no room for.
+#:
+#: One coursework and *two* MCQs -- 30 + 35 + 35 -- where the template is
+#: written for two courseworks and one MCQ. Nothing about it is exotic; it is
+#: simply a permutation the department's file was not drawn for, which until
+#: `build_departmental_sheet` existed meant reshaping the block by hand.
+#:
+#: **The two MCQs are marked on different scales on purpose.** An MCQ here is
+#: sometimes graded out of 100 and then weighted, and sometimes graded out of
+#: however many questions it had; both happen, so the fixture carries one of
+#: each rather than the same case twice. MCQ 1 is out of 100 worth 35, MCQ 2
+#: is out of 10 worth 35, and the sheet ends up holding `=E30/100*35` beside
+#: `=G30/10*35`.
+#:
+#: The second of those is the one that matters. Every other assessment in this
+#: project is marked out of 100 or on its own weight, so nothing had ever
+#: scaled *up* -- and a scale-up is what found the collation bug where the
+#: weighted column's name was inferred from the fraction rather than taken
+#: from the assessment. Keep an assessment here that is not out of 100.
+SECOND_CODE = "PS4002"
+SECOND_ASSESSMENTS = (
+    dict(id="cw1", type="coursework", name="Coursework 1",
+         marks_out_of=100, weight=30),
+    dict(id="mcq1", type="mcq", name="MCQ 1", marks_out_of=100, weight=35),
+    dict(id="mcq2", type="mcq", name="MCQ 2", marks_out_of=10, weight=35),
+)
+
+
+def second_module_marks() -> dict[str, dict[str, int]]:
+    """PS4002's marks, taken from the same cohort rather than invented.
+
+    Each assessment borrows the COHORT column that is already on its scale:
+    the coursework and MCQ 1 are out of 100 and take cw1 and cw2, MCQ 2 is out
+    of 10 and takes the mcq column. That keeps the edge cases that make the
+    cohort worth having -- Joyce still scores zero on everything, so he is
+    still NG rather than F.
+    """
+    return {
+        "cw1": {sid: cw1 for sid, _, _, cw1, _, _ in COHORT},
+        "mcq1": {sid: cw2 for sid, _, _, _, cw2, _ in COHORT},
+        "mcq2": {sid: mcq for sid, _, _, _, _, mcq in COHORT},
+    }
+
+
+#: A third module, and the one that exercises every route a mark can arrive by.
+#:
+#: Four assessments -- coursework, weekly quizzes, an MCQ and an exam -- which
+#: is the shape a full module actually has, and more importantly three
+#: *different* sources in one collation:
+#:
+#:   coursework  feedback sheets, read with catch_grades
+#:   quizzes     Brightspace exports, read with collect_quiz_marks
+#:   MCQ, exam   handed in through collate_module_marks(marks=), because an
+#:               exam script and a lecture-theatre MCQ are marked on paper
+#:
+#: PS4001 covers the first two and PS4002 the first and third; nothing had put
+#: all three in one module, and it is the combination that decides whether
+#: collate_module_marks picks the right source per assessment rather than per
+#: module.
+#:
+#: The weights sum to 100 with the quizzes fixed at 10 -- ten quizzes, each
+#: pass worth one mark overall -- leaving 90 to split. The MCQ at 100 marks
+#: worth 20 divides exactly (100/20 = 5), so the sheet gets `=F30/5`; the
+#: coursework and exam do not, so they get the long form. One module, both
+#: weighting shapes.
+THIRD_CODE = "PS4003"
+THIRD_ASSESSMENTS = (
+    dict(id="cw1", type="coursework", name="Coursework 1",
+         marks_out_of=100, weight=30),
+    dict(id="quizzes", type="quiz", name="Quizzes", marks_out_of=10, weight=10,
+         pass_mark=80.0, free_passes=0),
+    dict(id="mcq", type="mcq", name="MCQ", marks_out_of=100, weight=20),
+    dict(id="exam", type="exam", name="Exam", marks_out_of=100, weight=40),
+)
+
+#: Ten quizzes for ten marks and nothing forgiven, which is the plainest
+#: reading of "each pass is worth one mark overall". PS4001 sets eleven for
+#: ten with one free pass; carrying both means the collection rules are read
+#: off the assessment rather than assumed.
+THIRD_QUIZ_COUNT = 10
+
+
+def third_module_marks() -> dict[str, dict[str, int]]:
+    """PS4003's marks, taken from the same cohort rather than invented.
+
+    Each assessment borrows the COHORT column already on its scale: cw1 for
+    the coursework and cw2 for the MCQ, both out of 100, and the mcq column
+    for the quizzes, which is out of 10. The exam is the mean of the two
+    hundred-mark columns -- a fourth series was needed and deriving one keeps
+    the edge cases, where inventing one would not: Joyce still scores zero on
+    everything and is still NG rather than F.
+    """
+    return {
+        "cw1": {sid: cw1 for sid, _, _, cw1, _, _ in COHORT},
+        "quizzes": {sid: mcq for sid, _, _, _, _, mcq in COHORT},
+        "mcq": {sid: cw2 for sid, _, _, _, cw2, _ in COHORT},
+        "exam": {sid: (cw1 + cw2) // 2 for sid, _, _, cw1, cw2, _ in COHORT},
+    }
+
+
+#: The student information system's upload file, as SI issues it.
+#:
+#: Thirteen columns, `#` prefixes on headers *and* values, `#Ass#` with one at
+#: each end, and Mark/Grade/CD blank -- those are the three the module leader
+#: fills, and the bare `CD` is never filled by anyone.
+#:
+#: Read off a real file, and every detail matters to a writer that promises to
+#: change two fields and nothing else:
+#:
+#:   * **bare LF** line endings, on a file a Windows system produced. Writing
+#:     it back as text on Windows turns all of them into CRLF.
+#:   * no BOM, and a trailing newline.
+#:   * no quote characters anywhere, and no field holding a comma -- names are
+#:     upper case with no surname comma, so `KEVIN O'MALLEY` and not
+#:     `O'MALLEY, KEVIN`.
+SI_COLUMNS = (
+    "Year", "Period", "#Module", "Occ", "#Map", "#Ass#", "#SPR_Code",
+    "Name", "#CD", "Mark", "Grade", "CD", "#Cand Key",
+)
+
+#: How many times each student has taken the module. Almost everyone is on
+#: their first attempt; two are not, because the number goes into `#SPR_Code`
+#: and `#Cand Key` and cannot be derived from anything we hold -- a writer
+#: that rebuilt those keys instead of matching on them would get these wrong
+#: and nothing else.
+SI_ATTEMPTS = {"23304307": 2, "23304311": 3}
+
+#: The two-digit code SI carries in `#CD`. One of them starts with a zero,
+#: which is the point: `#07` through anything that treats it as a number
+#: comes back as `#7`.
+SI_CODES = ("37", "07", "70", "12")
+
+
+def write_si_export(path: pl.Path, code: str) -> pl.Path:
+    """Write the blank upload file SI would issue for a module.
+
+    SI *issues* this file; nothing in this package generates one for real. The
+    fixture has to play SI so `write_si_marks` has something faithful to fill
+    in -- otherwise the tests check the writer against its own invention.
+
+    Mark, Grade and CD are left empty, which is how it arrives.
+    """
+    lines = [",".join(SI_COLUMNS)]
+    for index, (sid, first, last, *_) in enumerate(COHORT):
+        key = f"#{sid}/{SI_ATTEMPTS.get(sid, 1)}"
+        lines.append(
+            ",".join(
+                (
+                    "2025/6",
+                    "SEM1",
+                    f"#{code}",
+                    "A",
+                    f"#{code}",
+                    "#1",
+                    key,
+                    f"{first} {last}".upper(),
+                    f"#{SI_CODES[index % len(SI_CODES)]}",
+                    "",   # Mark   -- the module leader's
+                    "",   # Grade  -- the module leader's
+                    "",   # CD     -- nobody's; it stays empty
+                    key,
+                )
+            )
+        )
+    # Bytes, bare LF, trailing newline, no BOM. Writing this as text would
+    # produce CRLF on Windows and the fixture would stop resembling the file
+    # it is standing in for.
+    path.write_bytes(("\n".join(lines) + "\n").encode("utf-8"))
+    return path
+
+
 #: The student who is in the class list but has no submission folder.
 NON_SUBMITTER = "23304311"
 
@@ -173,7 +344,9 @@ def _write_feedback_sheet(path: pl.Path, mark=None, cell: str = GRADE_CELL) -> p
     return path
 
 
-def write_quiz(folder: pl.Path, quiz: str, scores: dict) -> pl.Path:
+def write_quiz(
+    folder: pl.Path, quiz: str, scores: dict, code: str = "PS4001"
+) -> pl.Path:
     """Write one Brightspace quiz export.
 
     `scores` maps student id (bare digits, as the class list holds them) to
@@ -186,7 +359,7 @@ def write_quiz(folder: pl.Path, quiz: str, scores: dict) -> pl.Path:
     definition of what an export looks like, beside the one definition of
     what a submission folder looks like.
     """
-    path = folder / f"{quiz} - PS4001 - 12 January 2026.csv"
+    path = folder / f"{quiz} - {code} - 12 January 2026.csv"
     rows = [
         {
             "Org Defined ID": sid,
@@ -204,31 +377,48 @@ def write_quiz(folder: pl.Path, quiz: str, scores: dict) -> pl.Path:
     return path
 
 
-def _quiz_scores(target: int, count: int = QUIZ_COUNT) -> list:
+def _quiz_scores(
+    target: int, count: int = QUIZ_COUNT, free_passes: int = 1
+) -> list:
     """The per-quiz percentages that produce a mark of exactly `target`.
 
     Built backwards from the answer, which is what makes the fixture assert
-    something rather than merely exist. With one free pass, the mark is
-    ``min(passes + 1, marks_out_of)``, so:
+    something rather than merely exist. The mark is
+    ``min(passes + free_passes, marks_out_of)``, so with PS4001's single free
+    pass over eleven quizzes:
 
         target 0   sat nothing at all -- no rows anywhere, and no free pass
         target v   passed v - 1, failed the rest
         target 10  passed 9 of 11, and the cap does the last mark
+
+    `free_passes` is a parameter rather than the constant it started as
+    because PS4003 sets ten quizzes for ten marks and forgives none, which is
+    the plainest reading of "each pass is worth one mark": there, passes and
+    target are simply the same number.
 
     Returns one percentage per quiz, or an empty list for a student who
     never appears in an export.
     """
     if target <= 0:
         return []
-    passes = target - 1
+    passes = max(target - free_passes, 0)
     return [90.0] * passes + [10.0] * (count - passes)
 
 
-def _write_quiz_exports(folder: pl.Path, marks: dict) -> list:
+def _write_quiz_exports(
+    folder: pl.Path,
+    marks: dict,
+    count: int = QUIZ_COUNT,
+    free_passes: int = 1,
+    code: str = "PS4001",
+) -> list:
     """One export per quiz, holding every student who sat it."""
-    scores = {sid: _quiz_scores(target) for sid, target in marks.items()}
+    scores = {
+        sid: _quiz_scores(target, count=count, free_passes=free_passes)
+        for sid, target in marks.items()
+    }
     written = []
-    for index in range(QUIZ_COUNT):
+    for index in range(count):
         written.append(
             write_quiz(
                 folder,
@@ -238,6 +428,7 @@ def _write_quiz_exports(folder: pl.Path, marks: dict) -> list:
                     for sid, sat in scores.items()
                     if index < len(sat)
                 },
+                code=code,
             )
         )
     return written
@@ -360,9 +551,12 @@ def make_fake_module(
                   "grade_cell": GRADE_CELL, "graders": ["KOM", "SOB"]}
             for spec in specs
         ],
-        paths={"classlist": "classlist.xlsx"},
+        paths={"classlist": "classlist.xlsx", "si_file": "PS4001_SI.CSV"},
         overwrite=True,
     )
+
+    # --- the SI upload file, as SI would issue it --------------------------
+    write_si_export(root / "PS4001_SI.CSV", "PS4001")
 
     # --- class list --------------------------------------------------------
     classlist = root / "classlist.xlsx"
@@ -448,6 +642,270 @@ def make_fake_module(
         expected=_expected_frame(),
         grade_cell=GRADE_CELL,
     )
+
+
+def make_second_module(root: pl.Path, marked: bool = True) -> FakeModule:
+    """
+    Write PS4002 -- one coursework and two MCQs -- to ``root``.
+
+    A shape the departmental template has no room for, built so the
+    walkthrough can show `build_departmental_sheet` laying a sheet out for it.
+    The two MCQs are on different scales, one out of 100 and one out of 10,
+    because both happen.
+
+    Args:
+    root (pl.Path): Directory to build in. Created if absent.
+    marked (bool): Write each student's mark into their coursework feedback
+        sheet. The MCQs have no sheets at all -- they are sat on paper, and
+        their marks are handed to `collate_module_marks` through ``marks=``.
+
+    Returns:
+    FakeModule: The paths, plus an ``expected`` frame carrying the marks for
+    all three assessments, so the MCQ marks a caller has to hand in come from
+    the fixture rather than being retyped.
+
+    Example:
+        >>> second = make_second_module(pl.Path("scratch/PS4002"))
+        >>> by_id = second.expected.set_index("Student ID")
+        >>> collate_module_marks(
+        ...     module, class_list, source="feedback",
+        ...     marks={"mcq1": by_id["mcq1"].to_dict()},
+        ... )
+    """
+    marks = second_module_marks()
+    return _make_light_module(
+        root,
+        code=SECOND_CODE,
+        name="Cognition and Perception",
+        specs=SECOND_ASSESSMENTS,
+        marks=marks,
+        expected=_second_expected_frame(marks),
+        marked=marked,
+    )
+
+
+def make_third_module(root: pl.Path, marked: bool = True) -> FakeModule:
+    """
+    Write PS4003 -- coursework, weekly quizzes, an MCQ and an exam -- to ``root``.
+
+    The module that exercises **every route a mark can arrive by** in one
+    collation: the coursework off its feedback sheets, the quizzes out of
+    Brightspace's own exports, and the MCQ and exam handed in because they
+    were marked on paper. PS4001 covers the first two and PS4002 the first and
+    third; this is the only one where `collate_module_marks` has to choose all
+    three, per assessment, in a single call.
+
+    Args:
+    root (pl.Path): Directory to build in. Created if absent.
+    marked (bool): Write each student's mark into their coursework feedback
+        sheet.
+
+    Returns:
+    FakeModule: The paths, the quiz exports, and an ``expected`` frame holding
+    every assessment's marks and the total they should produce.
+
+    Note:
+        Ten quizzes for ten marks with no free pass, so a student's mark is
+        simply the number they passed. PS4001 sets eleven for ten and forgives
+        one, and keeping both is deliberate: the rules are read off the
+        assessment in `module.toml`, so a fixture that only ever showed one
+        set of them would not prove that.
+
+    Example:
+        >>> third = make_third_module(pl.Path("scratch/PS4003"))
+        >>> by_id = third.expected.set_index("Student ID")
+        >>> collate_module_marks(
+        ...     module, class_list, source="feedback",
+        ...     marks={"mcq": by_id["mcq"].to_dict(),
+        ...            "exam": by_id["exam"].to_dict()},
+        ... )
+    """
+    marks = third_module_marks()
+    return _make_light_module(
+        root,
+        code=THIRD_CODE,
+        name="Research Design and Analysis",
+        specs=THIRD_ASSESSMENTS,
+        marks=marks,
+        expected=_third_expected_frame(marks),
+        marked=marked,
+        quiz_count=THIRD_QUIZ_COUNT,
+    )
+
+
+def _make_light_module(
+    root: pl.Path,
+    code: str,
+    name: str,
+    specs: tuple,
+    marks: dict,
+    expected: pd.DataFrame,
+    marked: bool = True,
+    quiz_count: int = QUIZ_COUNT,
+) -> FakeModule:
+    """The generator behind PS4002 and PS4003.
+
+    Deliberately lighter than `make_fake_module`: the marking pipeline is
+    demonstrated twice over by PS4001, so this writes only what is needed to
+    collate a module and build its sheet. A coursework gets feedback sheets in
+    submission folders, a quiz gets Brightspace exports, and anything else
+    gets nothing at all -- it is marked on paper and its marks are handed to
+    `collate_module_marks` through ``marks=``.
+
+    The cohort and the class list are PS4001's. These are the same students
+    taking another module, which is what makes reusing the class list
+    reasonable rather than lazy.
+    """
+    root = pl.Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+
+    handle = init_module(
+        root,
+        code=code,
+        name=name,
+        year="2025/26",
+        leader={"initials": "KOM", "name": "Kevin O Malley"},
+        internal_moderator="SOB",
+        assessments=[
+            {**spec, "folder": spec["id"]}
+            if spec["type"] != "coursework"
+            else {**spec, "folder": spec["id"],
+                  "rubric": "Feedback sheet BLANK.xlsx",
+                  "grade_cell": GRADE_CELL, "graders": ["KOM", "SOB"]}
+            for spec in specs
+        ],
+        paths={"classlist": "classlist.xlsx", "si_file": f"{code}_SI.CSV"},
+        overwrite=True,
+    )
+
+    write_si_export(root / f"{code}_SI.CSV", code)
+
+    classlist = root / "classlist.xlsx"
+    _classlist_frame().to_excel(classlist, index=False)
+
+    submissions: dict[str, pl.Path] = {}
+    rubrics: dict[str, pl.Path] = {}
+    grading_output: dict[str, pl.Path] = {}
+    quiz_exports: dict[str, list] = {}
+
+    for spec in specs:
+        assessment = handle.module.assessment(spec["id"])
+        submissions[spec["id"]] = assessment.submissions_path
+        grading_output[spec["id"]] = assessment.grading_output_path
+
+        if spec["type"] == "quiz":
+            # Nobody marks a quiz. Brightspace's exports go where the
+            # download would be, and the pass mark and free passes that turn
+            # them into a mark are in module.toml, not here.
+            quiz_exports[spec["id"]] = _write_quiz_exports(
+                assessment.submissions_path,
+                marks[spec["id"]],
+                count=quiz_count,
+                free_passes=spec.get("free_passes", 0),
+                code=code,
+            )
+            continue
+
+        if spec["type"] != "coursework":
+            # Sat on paper: no download, no feedback sheet, nothing on disk.
+            continue
+
+        rubrics[spec["id"]] = _write_feedback_sheet(assessment.rubric_path, mark=None)
+
+        for sid, _, last, *_ in COHORT:
+            if sid == NON_SUBMITTER:
+                continue
+            folder = assessment.submissions_path / _brightspace_folder(
+                sid, last, "14 April 2026 430 PM"
+            )
+            folder.mkdir(exist_ok=True)
+            _write_feedback_sheet(
+                folder / f"Feedback sheet {sid}.xlsx",
+                mark=marks[spec["id"]][sid] if marked else None,
+            )
+
+    return FakeModule(
+        root=root,
+        module_file=handle.path,
+        classlist=classlist,
+        submissions=submissions,
+        rubrics=rubrics,
+        grading_output=grading_output,
+        quiz_exports=quiz_exports,
+        expected=expected,
+        grade_cell=GRADE_CELL,
+    )
+
+
+def _third_expected_frame(marks: dict) -> pd.DataFrame:
+    """PS4003's marks and the total they should produce.
+
+    Each component scaled by weight/marks_out_of and left unrounded, with
+    excel_round applied once to the total -- the sheet's own rule. The
+    non-submitter has no coursework mark, so his total is the other three.
+    """
+    rows = []
+    for sid, first, last, *_ in COHORT:
+        submitted = sid != NON_SUBMITTER
+        coursework = marks["cw1"][sid] if submitted else None
+        total = excel_round(
+            (coursework * (30 / 100) if submitted else 0)
+            + marks["quizzes"][sid] * (10 / 10)
+            + marks["mcq"][sid] * (20 / 100)
+            + marks["exam"][sid] * (40 / 100)
+        )
+        rows.append(
+            {
+                "Student ID": sid,
+                "First Name": first,
+                "Last Name": last,
+                "cw1": coursework,
+                "quizzes": marks["quizzes"][sid],
+                "mcq": marks["mcq"][sid],
+                "exam": marks["exam"][sid],
+                "Total % Grade": total,
+                "Letter Grade": make_letter_grade(total),
+                "submitted": submitted,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _second_expected_frame(marks: dict) -> pd.DataFrame:
+    """PS4002's marks and the total they should produce.
+
+    Weighted the way the sheet weights them -- each component scaled by
+    weight/marks_out_of and left unrounded, with excel_round applied once to
+    the total. Rounding the components instead moves totals across band
+    boundaries, which is the whole point of the rule.
+    """
+    rows = []
+    for sid, first, last, *_ in COHORT:
+        # The non-submitter has no feedback sheet, so there is no coursework
+        # mark to read and his total is the MCQs alone. Crediting him with the
+        # cohort's cw1 value would make `expected` disagree with anything that
+        # actually collates the module -- and disagree by 30 marks, silently.
+        submitted = sid != NON_SUBMITTER
+        coursework = marks["cw1"][sid] if submitted else None
+        total = excel_round(
+            (coursework * (30 / 100) if submitted else 0)
+            + marks["mcq1"][sid] * (35 / 100)
+            + marks["mcq2"][sid] * (35 / 10)
+        )
+        rows.append(
+            {
+                "Student ID": sid,
+                "First Name": first,
+                "Last Name": last,
+                "cw1": coursework,
+                "mcq1": marks["mcq1"][sid],
+                "mcq2": marks["mcq2"][sid],
+                "Total % Grade": total,
+                "Letter Grade": make_letter_grade(total),
+                "submitted": sid != NON_SUBMITTER,
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ int64 columns". So the id columns are read as text, explicitly.
 """
 
 import warnings
+from typing import NamedTuple
 
 from ..dependencies import pd, pl
 
@@ -26,6 +27,74 @@ from ..dependencies import pd, pl
 ID_COLUMNS: tuple[str, ...] = ("Student ID", "OrgDefinedId", "Username")
 
 _SUFFIX = {"excel": "xlsx", "csv": "csv"}
+
+#: What the collated grader files are written as. This is the record the
+#: *department* receives, as distinct from the feedback sheets the students
+#: received -- see the notes' "The two records, and why there is no fallback".
+COLLATED_STEM = "completed_grades"
+
+
+class Collation(NamedTuple):
+    """What `save_collated_grades` wrote.
+
+    Same idea as `Allocation`: the file existing is what says the grades were
+    collected, and `students` is what tells an empty file from a real one.
+    """
+
+    path: pl.Path
+    students: int
+
+    def __str__(self) -> str:
+        return f"{self.path.name}: {self.students} students collected"
+
+
+def save_collated_grades(
+    df: pd.DataFrame,
+    folder: pl.Path,
+    file_type: str = "csv",
+    overwrite: bool = False,
+) -> Collation:
+    """
+    Write the collated grader files, and say what went in.
+
+    Args:
+    df (pd.DataFrame): The collated marks.
+    folder (pl.Path): Where to write, usually the assessment's grading output.
+    file_type (str): "csv" or "excel".
+    overwrite (bool): Replace an existing file. Defaults to False, because it
+        may already hold the marks the department was sent.
+
+    Returns:
+    Collation: The path and how many students reached it.
+
+    Note:
+        Split out of `ingest_completed_graderfiles` so the artefact has a
+        writer that reports what it did. `ingest_completed_graderfiles(save=True)`
+        calls this, so there is one definition of what the collated file is and
+        where it goes.
+
+    Raises:
+    ValueError: If `file_type` is not "csv" or "excel".
+    FileExistsError: If the file exists and `overwrite` is False.
+
+    Example:
+        >>> collation = save_collated_grades(marks, assessment.grading_output_path)
+        >>> handle.record(collation, assessment.id)
+    """
+    if file_type not in _SUFFIX:
+        raise ValueError(
+            f"file_type must be one of {list(_SUFFIX)}, not {file_type!r}"
+        )
+    target = pl.Path(folder) / f"{COLLATED_STEM}.{_SUFFIX[file_type]}"
+    if target.exists() and not overwrite:
+        raise FileExistsError(
+            f"{target} already exists. Pass overwrite=True to replace it."
+        )
+    if file_type == "excel":
+        df.to_excel(target, index=False)
+    else:
+        df.to_csv(target, index=False)
+    return Collation(path=target, students=len(df))
 
 
 def _columns_in(path: pl.Path, file_type: str) -> list[str]:
@@ -124,14 +193,7 @@ def ingest_completed_graderfiles(
     df = pd.concat(frames, ignore_index=True)
 
     if save:
-        target = folder / f"completed_grades.{suffix}"
-        if target.exists() and not overwrite:
-            raise FileExistsError(
-                f"{target} already exists. Pass overwrite=True to replace it."
-            )
-        if file_type == "excel":
-            df.to_excel(target, index=False)
-        else:
-            df.to_csv(target, index=False)
+        # One definition of what the collated file is and where it goes.
+        save_collated_grades(df, folder, file_type=file_type, overwrite=overwrite)
 
     return df

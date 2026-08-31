@@ -12,6 +12,8 @@ as if it were a coursework.
 House convention: ``pl`` is pathlib, ``pr`` is polars.
 """
 
+import sys
+
 import pandas as pd
 import pytest
 
@@ -358,3 +360,103 @@ def test_something_that_is_not_a_module_is_refused(quiz_module):
 
     with pytest.raises(ValueError, match="load_module"):
         collate_module_marks({"code": "PS4001"}, class_list)
+
+
+def test_weighting_survives_an_assessment_not_marked_out_of_100(tmp_path):
+    """The weighted column must be named by the assessment, not inferred.
+
+    `calculate_weighted_score` derives the label by multiplying the fraction
+    by 100, which is the weight only when the piece is marked out of 100. Out
+    of 50 and worth 25 it produces '(50)' -- the raw column's own name, which
+    it refuses to overwrite -- and out of 10 and worth 35 it produces '(350)'.
+    Both were reported by returning a string, and `collate_module_marks`
+    discarded it, so the weighted column silently never appeared. The failure
+    then surfaced two steps later, as
+    `prepare_data_for_departmental_template` complaining about a missing
+    column it had been handed no way to create.
+
+    That is the failure mode this package exists to prevent: a component
+    quietly absent from a total that still looks like a mark.
+    """
+    import pathlib as pl
+
+    from grader_helper import collate_module_marks, import_brightspace_classlist
+    from grader_helper.models import ModuleFile
+
+    sys.path.insert(0, str(pl.Path(__file__).parent))
+    from fake_module import make_second_module
+
+    second = make_second_module(tmp_path / "PS4002")
+    module = ModuleFile.load(tmp_path / "PS4002").module
+    class_list = import_brightspace_classlist(module.classlist_path)
+    by_id = second.expected.set_index("Student ID")
+
+    marks = collate_module_marks(
+        module,
+        class_list,
+        source="feedback",
+        marks={
+            "mcq1": by_id["mcq1"].to_dict(),
+            "mcq2": by_id["mcq2"].to_dict(),
+        },
+    )
+
+    # Every column the module declares, weighted ones included.
+    for column in module.grade_sheet_columns:
+        assert column in marks.columns, f"{column} is missing from the collation"
+
+    # And they hold the right arithmetic, in both directions. MCQ 1 is out of
+    # 100 and scales down; MCQ 2 is out of 10 worth 35 and scales *up*, which
+    # is the case that had no weighted column at all.
+    assert module.assessment("mcq1").weight_fraction() == 0.35
+    assert module.assessment("mcq2").weight_fraction() == 3.5
+    assert marks["MCQ 1 (35)"].tolist() == (marks["MCQ 1 (100)"] * 0.35).tolist()
+    assert marks["MCQ 2 (35)"].tolist() == (marks["MCQ 2 (10)"] * 3.5).tolist()
+
+
+def test_one_collation_reads_three_different_sources(tmp_path):
+    """A coursework, a set of quizzes and two paper-marked pieces, in one call.
+
+    `collate_module_marks` picks a source per assessment by asking what each
+    one *has*: marks handed in through `marks=` first, then a `grade_cell` to
+    read a feedback sheet with, then quiz exports in the submissions folder.
+    Every module before PS4003 had at most two of those, so nothing showed
+    that the choice was really per assessment rather than per module.
+
+    Only the MCQ and the exam are handed in here. The coursework and the
+    quizzes have to be found.
+    """
+    import pathlib as pl
+
+    from grader_helper import collate_module_marks, import_brightspace_classlist
+    from grader_helper.models import ModuleFile
+
+    sys.path.insert(0, str(pl.Path(__file__).parent))
+    from fake_module import make_third_module
+
+    third = make_third_module(tmp_path / "PS4003")
+    module = ModuleFile.load(tmp_path / "PS4003").module
+    class_list = import_brightspace_classlist(module.classlist_path)
+    by_id = third.expected.set_index("Student ID")
+
+    marks = collate_module_marks(
+        module,
+        class_list,
+        source="feedback",
+        marks={"mcq": by_id["mcq"].to_dict(), "exam": by_id["exam"].to_dict()},
+    )
+
+    # Found on disk, not handed in: the coursework off its feedback sheets...
+    assert marks.set_index("Student ID")["Coursework 1 (100)"].dropna().to_dict() == (
+        by_id["cw1"].dropna().to_dict()
+    ), "the coursework was not read from its feedback sheets"
+
+    # ...and the quizzes out of Brightspace's exports, through the module's
+    # own pass mark and free passes.
+    assert marks.set_index("Student ID")["Quizzes (10)"].to_dict() == (
+        by_id["quizzes"].to_dict()
+    ), "the quizzes were not collected from the exports"
+
+    # And every column the module declares is present and weighted.
+    for column in module.grade_sheet_columns:
+        assert column in marks.columns, f"{column} is missing from the collation"
