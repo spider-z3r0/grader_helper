@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 517 tests on Linux and 518 with a real Excel:
+Done, 520 tests on Linux and 521 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -450,15 +450,28 @@ and only in the browser. The summary is therefore built as a list of lines
 at column zero and joined, and the test asserts on the rendered HTML rather
 than on the values the cell defined.
 
-Verified by reintroducing six bugs and watching the right tests fail:
+**The form collects what the marking steps read**: graders, the blank
+feedback sheet and the cell the mark lands in, as well as the two numbers.
+That is the difference between a module the page can display and one it can
+run — allocation needs the graders, distribution needs the sheet, and
+catching the marks needs the cell — so a module set up here needs no
+hand-editing before the first step. What is left blank is left out of the
+file rather than written empty: `graders = []` says nobody marks this, which
+is an answer, where an absent key is a question not yet answered. The page
+then names any assessment short of the three, and exempts the ones collected
+from Brightspace, because nobody marks a quiz.
+
+Verified by reintroducing nine bugs and watching the right tests fail:
 treating an unreadable file as an empty folder (5 tests), `can_initialise`
 as "anything not loaded" (1), offering setup for anything that did not load
 (2), inferring collection from the type (2), the indented-f-string dedent
-above (1), and showing *written* in the *sent* column (1).
+above (1), showing *written* in the *sent* column (1), taking the graders
+field as one name rather than a comma-separated list (1), writing the blank
+fields into the file anyway (1), and counting a quiz as not ready to mark
+(1).
 
-Not done here: rubrics, grade cells and graders are not in the form -- add
-them to `module.toml`, where its own comments explain them -- and the
-dashboard shows a module but does not yet run a step against it.
+Not done here: the dashboard shows a module and sets one up, but does not
+yet run a step against it. That is the next chunk.
 
 ### Next
 

@@ -208,11 +208,16 @@ def test_the_rules_are_written_when_the_row_is_ticked(run_dashboard, tmp_path):
     folder = tmp_path / "PS4034"
     folder.mkdir()
 
-    spec_for = run_dashboard(folder).names["assessment_spec"]
-    row = dict(
-        id="quizzes", type="quiz", name="Quizzes", marks_out_of=10, weight=10,
-        pass_mark=80, free_passes=1,
-    )
+    ran = run_dashboard(folder)
+    spec_for = ran.names["assessment_spec"]
+    # Built from a real form row rather than a dict written out here, so that
+    # a field added to the form does not quietly go untested -- and does not
+    # break this with a KeyError either.
+    row = {
+        **ran.names["rows"].value[0],
+        "id": "quizzes", "type": "quiz", "name": "Quizzes",
+        "marks_out_of": 10, "weight": 10, "pass_mark": 80, "free_passes": 1,
+    }
 
     ticked = spec_for({**row, "collected": True})
     unticked = spec_for({**row, "collected": False})
@@ -226,14 +231,16 @@ def test_a_ticked_row_makes_a_module_that_collects_its_quizzes(run_dashboard, tm
     folder = tmp_path / "PS4034"
     folder.mkdir()
 
-    spec_for = run_dashboard(folder).names["assessment_spec"]
+    ran = run_dashboard(folder)
+    spec_for = ran.names["assessment_spec"]
+    blank = ran.names["rows"].value[0]
     specs = [
-        spec_for(dict(id="cw1", type="coursework", name="Coursework 1",
-                      marks_out_of=100, weight=90, collected=False,
-                      pass_mark=80, free_passes=0)),
-        spec_for(dict(id="quizzes", type="quiz", name="Quizzes",
-                      marks_out_of=10, weight=10, collected=True,
-                      pass_mark=80, free_passes=1)),
+        spec_for({**blank, "id": "cw1", "type": "coursework",
+                  "name": "Coursework 1", "marks_out_of": 100, "weight": 90,
+                  "collected": False}),
+        spec_for({**blank, "id": "quizzes", "type": "quiz", "name": "Quizzes",
+                  "marks_out_of": 10, "weight": 10, "collected": True,
+                  "pass_mark": 80, "free_passes": 1}),
     ]
     init_module(folder, "PS4034", "Research Methods", "2025/26", "KOM",
                 assessments=specs)
@@ -268,6 +275,7 @@ def test_the_module_page_has_its_sections(run_dashboard, tmp_path):
     assert headings == [
         "PS4034 — Research Methods",
         "Assessment",
+        "Marking setup",
         "Progress",
         "Produced once for the module",
         "Files",
@@ -294,3 +302,106 @@ def test_written_is_shown_apart_from_sent(run_dashboard, tmp_path):
     )
 
     assert row.groups() == ("yes", "-")
+
+
+# ---------------------------------------------------------------------------
+# Set up here, marked later
+# ---------------------------------------------------------------------------
+
+
+def test_a_module_set_up_here_is_ready_to_be_marked(run_dashboard, tmp_path):
+    """The point of the form: no hand-editing before the first real step.
+
+    Allocation needs the graders, distribution needs the blank feedback
+    sheet, and catching the marks needs the cell they land in. A module that
+    has to be opened in a text editor before any of that runs is a setup
+    form that did not finish the job.
+    """
+    folder = tmp_path / "PS4034"
+    folder.mkdir()
+
+    ran = run_dashboard(folder)
+    blank = ran.names["rows"].value[0]
+    specs = [
+        ran.names["assessment_spec"](
+            {
+                **blank,
+                "id": "cw1", "type": "coursework", "name": "Coursework 1",
+                "marks_out_of": 100, "weight": 100, "collected": False,
+                # Lower case and loosely spaced, the way it gets typed.
+                "graders": " kom ,sob ",
+                "rubric": "Feedback sheet.xlsx",
+                "grade_cell": "B12",
+            }
+        )
+    ]
+    init_module(folder, "PS4034", "Research Methods", "2025/26", "KOM",
+                assessments=specs)
+
+    cw1 = load_module(folder).assessment("cw1")
+
+    assert [g.initials for g in cw1.graders] == ["KOM", "SOB"]
+    assert cw1.grade_cell == "B12"
+    assert cw1.rubric_path == folder / "assessments" / "cw1" / "Feedback sheet.xlsx"
+
+
+def test_what_was_left_blank_is_left_out(run_dashboard, tmp_path):
+    """An absent key is a question not yet answered.
+
+    `graders = []` is a different claim -- it says nobody marks this -- and
+    writing it for a form field nobody filled in would put an answer in the
+    file that no one gave.
+    """
+    folder = tmp_path / "PS4034"
+    folder.mkdir()
+
+    shown = run_dashboard(folder)
+
+    for spec in shown.names["specs"]:
+        assert not {"graders", "rubric", "grade_cell"} & spec.keys(), spec
+
+    init_module(folder, "PS4034", "Research Methods", "2025/26", "KOM",
+                assessments=shown.names["specs"])
+    written = (folder / MODULE_FILENAME).read_text(encoding="utf-8")
+
+    assert "graders" not in written
+
+
+def test_the_page_names_what_marking_still_needs(run_dashboard, tmp_path):
+    """Discovered on the page, not at the first click.
+
+    Allocation needs graders, distribution needs the blank sheet, and
+    catching the marks needs the cell. A module missing any of them is not
+    markable, and finding that out from a traceback halfway through a step
+    is worse than being told before starting.
+    """
+    folder = tmp_path / "PS4034"
+    folder.mkdir()
+
+    ran = run_dashboard(folder)
+    blank = ran.names["rows"].value[0]
+    spec_for = ran.names["assessment_spec"]
+    init_module(
+        folder, "PS4034", "Research Methods", "2025/26", "KOM",
+        assessments=[
+            spec_for({**blank, "id": "cw1", "type": "coursework",
+                      "name": "Coursework 1", "marks_out_of": 100, "weight": 60,
+                      "collected": False, "graders": "KOM, SOB",
+                      "rubric": "Feedback sheet.xlsx", "grade_cell": "B12"}),
+            spec_for({**blank, "id": "cw2", "type": "coursework",
+                      "name": "Coursework 2", "marks_out_of": 100, "weight": 30,
+                      "collected": False, "graders": "KOM"}),
+            spec_for({**blank, "id": "quizzes", "type": "quiz", "name": "Quizzes",
+                      "marks_out_of": 10, "weight": 10, "collected": True,
+                      "pass_mark": 80, "free_passes": 1}),
+        ],
+    )
+
+    page = run_dashboard(folder).page
+
+    # cw2 is named, with both of the things it is short of.
+    assert "cw2" in page and "no feedback sheet or mark cell" in page
+    # cw1 is complete, and the quizzes need none of it -- nobody marks a quiz.
+    assert "cw1</code> has no" not in page
+    assert "quizzes</code> has no" not in page
+    assert "collected from Brightspace" in page

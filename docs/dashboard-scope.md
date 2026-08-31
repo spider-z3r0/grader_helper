@@ -65,9 +65,13 @@ folder or sets one up, and shows what is in it. See **Pointing at a folder** in
   A `module.toml` that will not load is never offered setup, because that
   would mean `overwrite=True` over the module's memory to fix a typo.
 - `inspect_module_folder` never raises. A dashboard cell runs on every click.
-- The setup form asks for the module, then *n* rows of assessment. Validation
-  stays in the model: the form shows the running weight total, `init_module`
+- The setup form asks for the module, then *n* rows of assessment —
+  including the graders, the blank feedback sheet and the mark cell, so a
+  module set up in the app is runnable without hand-editing. Validation stays
+  in the model: the form shows the running weight total, `init_module`
   refuses everything else and its message is displayed.
+- The page names any assessment missing what marking needs, and exempts the
+  ones collected from Brightspace.
 
 What is **not** built: running any step from the page. That is the next chunk,
 and it is where the scratch copy below has to be designed.

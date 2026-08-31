@@ -174,6 +174,57 @@ def the_module(found, loaded):
             "",
             f"Weights sum to **{sum(a.weight for a in module.assessments)}**.",
             "",
+            "### Marking setup",
+            "",
+            "| id | graders | blank feedback sheet | mark is in |",
+            "|---|---|---|---|",
+        ]
+
+        # An assessment collected from Brightspace has none of this and needs
+        # none of it: nobody marks a quiz. Everything else needs all three
+        # before a single step will run -- graders to allocate, a blank sheet
+        # to distribute, a cell to read the mark back out of -- so what is
+        # missing is named here rather than discovered at the first click.
+        def _collected(assessment) -> bool:
+            return assessment.pass_mark is not None
+
+        def _missing(assessment) -> list[str]:
+            if _collected(assessment):
+                return []
+            return [
+                label
+                for label, value in (
+                    ("graders", assessment.graders),
+                    ("feedback sheet", assessment.rubric),
+                    ("mark cell", assessment.grade_cell),
+                )
+                if not value
+            ]
+
+        for a in module.assessments:
+            if _collected(a):
+                lines.append(
+                    f"| `{a.id}` | collected from Brightspace — "
+                    f"pass mark {a.pass_mark}, {a.free_passes} free | | |"
+                )
+            else:
+                lines.append(
+                    f"| `{a.id}` | "
+                    f"{', '.join(g.initials for g in a.graders) or '—'} | "
+                    f"{a.rubric or '—'} | {a.grade_cell or '—'} |"
+                )
+
+        unready = {a.id: _missing(a) for a in module.assessments if _missing(a)}
+        lines += [
+            "",
+            "Every assessment has what marking it needs."
+            if not unready
+            else "**Not ready to mark:** "
+            + "; ".join(
+                f"`{aid}` has no {' or '.join(gaps)}" for aid, gaps in unready.items()
+            )
+            + ". Add them in `module.toml`.",
+            "",
             "### Progress",
             "",
             "| id | allocated | distributed | collected | moderated |",
@@ -290,6 +341,21 @@ def assessment_rows(how_many):
                     start=0, stop=100, step=0.5,
                     value=default["weight"], label="worth",
                 ),
+                "grade_cell": mo.ui.text(
+                    value=default.get("grade_cell", ""),
+                    placeholder="B12",
+                    label="mark is in cell",
+                ),
+                "graders": mo.ui.text(
+                    value=", ".join(default.get("graders", ())),
+                    placeholder="KOM, SOB",
+                    label="graders (initials)",
+                ),
+                "rubric": mo.ui.text(
+                    value=default.get("rubric", ""),
+                    placeholder="Feedback sheet.xlsx",
+                    label="blank feedback sheet",
+                ),
                 "collected": mo.ui.checkbox(
                     value="pass_mark" in default,
                     label="collected from Brightspace exports",
@@ -316,7 +382,11 @@ def the_form(offer, rows, code, title, year, leader, moderator, classlist, depar
             [
                 mo.md(f"**Assessment {index + 1}**"),
                 mo.hstack([row["id"], row["type"], row["name"]], justify="start"),
-                mo.hstack([row["marks_out_of"], row["weight"]], justify="start"),
+                mo.hstack(
+                    [row["marks_out_of"], row["weight"], row["grade_cell"]],
+                    justify="start",
+                ),
+                mo.hstack([row["graders"], row["rubric"]], justify="start"),
                 mo.hstack(
                     [row["collected"], row["pass_mark"], row["free_passes"]],
                     justify="start",
@@ -353,9 +423,17 @@ def the_form(offer, rows, code, title, year, leader, moderator, classlist, depar
                 Ten weekly quizzes, each pass worth 1%, are **one** row —
                 marked out of 10 and worth 10.
 
-                Rubrics, grade cells and graders are not asked for here; add
-                them to `module.toml` afterwards, where the file's own
-                comments explain them.
+                **Graders**, the **blank feedback sheet** and the **cell the
+                mark lands in** are what the marking steps read: who gets a
+                workbook, what is copied into each student's folder, and
+                where a grader's mark is found afterwards. Initials go in
+                comma separated — `KOM, SOB` — and the sheet is a filename
+                inside the assessment's own folder, not a path.
+
+                Leave all three blank for anything nobody marks by hand, and
+                for an assessment whose graders are not decided yet: an
+                absent key is a question not yet answered, and you can add it
+                to `module.toml` later.
                 """
             ),
             *[_row_view(i, rows[i]) for i in range(len(rows))],
@@ -388,6 +466,21 @@ def the_specs(rows):
         if row["collected"]:
             spec["pass_mark"] = row["pass_mark"]
             spec["free_passes"] = int(row["free_passes"])
+
+        # What the marking steps read off the model: who marks it, the blank
+        # sheet they are given, and the cell their mark lands in. Left out
+        # of the file entirely when blank rather than written empty -- a
+        # `graders = []` reads as "nobody marks this", which is a claim,
+        # where an absent key is just a question not yet answered.
+        graders = [
+            initials.strip() for initials in row["graders"].split(",")
+            if initials.strip()
+        ]
+        if graders:
+            spec["graders"] = graders
+        for key in ("rubric", "grade_cell"):
+            if row[key].strip():
+                spec[key] = row[key].strip()
         return spec
 
     specs = [assessment_spec(row) for row in rows.value]

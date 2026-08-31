@@ -200,8 +200,14 @@ year of a single module, `OneDrive\teaching\2026\Sem1\PS4034`. If a
 `module.toml` is in there it loads and the page shows the module: its
 assessment, its weights, the columns each piece produces, what has been done
 so far, and whether the folders it names exist. If the folder is empty you
-get a form instead: how many pieces of assessment, then the two numbers for
-each, and a button that writes `module.toml` and creates the folders.
+get a form instead: how many pieces of assessment, then for each one the two
+numbers, its graders, the blank feedback sheet and the cell the mark lands
+in — everything the marking steps read — and a button that writes
+`module.toml` and creates the folders.
+
+Leave the graders, sheet and cell blank for anything nobody marks by hand, or
+for an assessment whose graders are not decided yet; the page then lists what
+each assessment is still short of.
 
 Clicking down from your home folder to a module gets old. Set the browser's
 starting point once:
