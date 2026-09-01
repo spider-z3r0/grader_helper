@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 670 tests on Linux and 671 with a real Excel:
+Done, 678 tests on Linux and 679 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -1805,6 +1805,28 @@ class list, which is the first item above; the fix was that one, not a
 second button. `blocking` gained one reason of its own -- a leader-managed
 group assessment with no sheets folder now says so up front rather than
 failing inside the step.
+
+#### "folders there: 0" meant four different things
+
+The assessment panel counted the directories immediately inside
+`submissions/` and printed the number. It printed **0** for a folder that is
+not there, a folder with nothing in it, a download still sitting in its zip,
+and a download unzipped one level too deep -- four situations wanting four
+different things done, reported identically. The last is the common one:
+extracting the zip makes a folder named for the download and puts the
+student folders inside *that*, and every step here iterates the directories
+immediately inside `submissions/`, so it finds nothing and says nothing.
+
+`submissions_state(path)` now returns the count **and what is wrong**, and
+names the wrapper folder when it finds one. Distribution blocks on "there
+are no student folders in `<path>`" rather than "there is no submissions
+folder at `<path>`", which was a false statement about a folder plainly
+sitting there and sent the reader looking in the wrong place.
+
+The one-folder test is `len(folders) == 1 and any(p.is_dir() for p in
+folders[0].iterdir())`, not `len(folders) == 1`: a cohort of one, or the
+last folder left after resolving the others, is a student folder, and a
+student folder holds files rather than folders.
 
 #### The crash it turned up
 

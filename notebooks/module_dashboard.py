@@ -860,11 +860,52 @@ def pick_an_assessment(found, loaded):
 
 @app.cell
 def the_chosen_assessment(found, loaded, which):
+    def submissions_state(subs):
+        """What is actually in the submissions folder, in words.
+
+        "folders there: 0" was true of a folder that is not there, a folder
+        with nothing in it, a download still sitting in its zip, and a
+        download unzipped one level too deep -- four situations wanting four
+        different things done, reported identically. Every step that reads
+        submissions iterates the directories immediately inside it, so the
+        difference is the difference between working and silently doing
+        nothing.
+        """
+        if not subs.is_dir():
+            return 0, "**not there** — unzip the Brightspace download into it"
+
+        folders = sorted(p for p in subs.iterdir() if p.is_dir())
+        files = sorted(p for p in subs.iterdir() if p.is_file())
+
+        if not folders:
+            zipped = [f.name for f in files if f.suffix.lower() == ".zip"]
+            if zipped:
+                return 0, (
+                    f"**still zipped** — `{zipped[0]}` is there but has not "
+                    "been extracted"
+                )
+            if files:
+                return 0, (
+                    f"**{len(files)} loose file(s), no folders** — a "
+                    "Brightspace download extracts to one folder per student"
+                )
+            return 0, "**empty** — the download has not been extracted into it"
+
+        # The classic: extracting the zip makes a folder named for the
+        # download, and the student folders are inside that. Everything
+        # downstream looks one level up from where they are and finds
+        # nothing, without complaining.
+        if len(folders) == 1 and any(p.is_dir() for p in folders[0].iterdir()):
+            return 1, (
+                f"**one level too deep** — the student folders are inside "
+                f"`{folders[0].name}/`. Move them up into `{subs.name}/`"
+            )
+
+        return len(folders), ""
+
     def _describe(assessment, repeats):
         subs = assessment.submissions_path
-        folders = (
-            sorted(p for p in subs.iterdir() if p.is_dir()) if subs.is_dir() else []
-        )
+        how_many, trouble = submissions_state(subs)
         # Folder names only, so this is cheap even on a real cohort.
         status = assessment.status
 
@@ -879,7 +920,8 @@ def the_chosen_assessment(found, loaded, which):
                     "| | |",
                     "|---|---|",
                     f"| submissions | `{subs}` |",
-                    f"| folders there | {len(folders)} |",
+                    f"| folders there | {how_many}"
+                    f"{' — ' + trouble if trouble else ''} |",
                     f"| submitted more than once | {len(repeats)} |",
                     f"| graders | "
                     f"{', '.join(g.initials for g in assessment.graders) or '—'} |",
@@ -911,7 +953,7 @@ def the_chosen_assessment(found, loaded, which):
     collected = chosen is not None and chosen.pass_mark is not None
 
     _describe(chosen, repeats) if chosen is not None else mo.md("")
-    return chosen, collected, repeats
+    return chosen, collected, repeats, submissions_state
 
 
 @app.cell
@@ -927,7 +969,7 @@ def step_options(loaded):
 
 
 @app.cell
-def why_not(chosen, collected, class_list, repeats):
+def why_not(chosen, collected, class_list, repeats, submissions_state):
     def blocking(*needs: str) -> list[str]:
         """What is missing before a step can run, in words."""
         if chosen is None:
@@ -939,8 +981,13 @@ def why_not(chosen, collected, class_list, repeats):
             "graders": "this assessment has no graders in module.toml",
             "rubric": "this assessment has no blank feedback sheet in module.toml",
             "grade cell": "this assessment has no mark cell in module.toml",
-            "submissions": f"there is no submissions folder at "
-            f"`{chosen.submissions_path}`",
+            "submissions": (
+                f"there is no submissions folder at "
+                f"`{chosen.submissions_path}`"
+                if not chosen.submissions_path.is_dir()
+                else f"there are no student folders in "
+                f"`{chosen.submissions_path}` — see the note above"
+            ),
             "one folder each": (
                 f"{len(repeats)} student(s) submitted more than once — "
                 "resolve that first, below"
@@ -955,7 +1002,11 @@ def why_not(chosen, collected, class_list, repeats):
             "graders": bool(chosen.graders),
             "rubric": bool(chosen.rubric),
             "grade cell": bool(chosen.grade_cell),
-            "submissions": chosen.submissions_path.is_dir(),
+            # A folder that is there but holds no student folders is not a
+            # download that can be distributed into, and saying "there is no
+            # folder" about a folder that plainly exists sent the reader
+            # looking in the wrong place.
+            "submissions": submissions_state(chosen.submissions_path)[0] > 0,
             "one folder each": not repeats,
             # Only leader-managed groups have sheets to be missing. A
             # Brightspace-managed one gets its groups from the class list,

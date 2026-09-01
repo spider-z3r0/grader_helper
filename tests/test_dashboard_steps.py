@@ -594,3 +594,117 @@ def test_reading_a_class_list_from_a_path_given(module_on_disk, dashboard):
 
     assert frame is not None and len(frame) > 0
     assert "students" in note
+
+
+# ---------------------------------------------------------------------------
+# What is actually in the submissions folder
+# ---------------------------------------------------------------------------
+#
+# "folders there: 0" was true of a folder that is not there, one with nothing
+# in it, a download still in its zip, and a download unzipped one level too
+# deep. Four situations wanting four different things done, reported
+# identically -- and every step that reads submissions iterates the
+# directories immediately inside it, so the difference is the difference
+# between working and silently doing nothing.
+
+
+@pytest.fixture
+def describe(module_on_disk, dashboard):
+    return dashboard(module_on_disk)["submissions_state"]
+
+
+def test_a_real_download_is_counted(describe, module_on_disk):
+    subs = module_on_disk / "assessments" / "cw1" / "submissions"
+
+    how_many, trouble = describe(subs)
+
+    assert how_many > 0
+    assert trouble == ""
+
+
+def test_a_folder_that_is_not_there_says_so(describe, tmp_path):
+    how_many, trouble = describe(tmp_path / "nothing")
+
+    assert how_many == 0
+    assert "not there" in trouble
+
+
+def test_an_empty_folder_is_not_a_missing_one(describe, tmp_path):
+    empty = tmp_path / "submissions"
+    empty.mkdir()
+
+    how_many, trouble = describe(empty)
+
+    assert how_many == 0
+    assert "empty" in trouble
+    assert "not there" not in trouble
+
+
+def test_a_download_still_in_its_zip_is_named(describe, tmp_path):
+    subs = tmp_path / "submissions"
+    subs.mkdir()
+    (subs / "PS4034 Assignment 1 Download.zip").write_bytes(b"PK")
+
+    how_many, trouble = describe(subs)
+
+    assert how_many == 0
+    assert "still zipped" in trouble
+    assert "PS4034 Assignment 1 Download.zip" in trouble
+
+
+def test_loose_files_with_no_folders_are_named(describe, tmp_path):
+    subs = tmp_path / "submissions"
+    subs.mkdir()
+    (subs / "essay.docx").write_bytes(b"")
+
+    how_many, trouble = describe(subs)
+
+    assert how_many == 0
+    assert "loose file" in trouble
+
+
+def test_a_download_unzipped_one_level_too_deep_is_named(describe, tmp_path):
+    """Extracting the zip makes a folder named for the download, with the
+    student folders inside it. Everything downstream looks one level up from
+    where they are and finds nothing, without complaining."""
+    subs = tmp_path / "submissions"
+    wrapper = subs / "PS4034 Assignment 1 Download Aug 5, 2026"
+    (wrapper / "27236-46025 - 23304308 Angood - 05 March 2026 612 PM").mkdir(
+        parents=True
+    )
+
+    how_many, trouble = describe(subs)
+
+    assert "one level too deep" in trouble
+    assert "PS4034 Assignment 1 Download Aug 5, 2026" in trouble
+
+
+def test_one_student_is_not_mistaken_for_a_nested_download(describe, tmp_path):
+    """A cohort of one, or the last folder left after resolving the rest.
+    A student folder holds files, not folders."""
+    subs = tmp_path / "submissions"
+    only = subs / "27236-46025 - 23304308 Angood - 05 March 2026 612 PM"
+    only.mkdir(parents=True)
+    (only / "essay.docx").write_bytes(b"")
+
+    how_many, trouble = describe(subs)
+
+    assert (how_many, trouble) == (1, "")
+
+
+def test_a_folder_with_no_student_folders_blocks_distribution(
+    module_on_disk, dashboard
+):
+    """And says so about the folder that is there, rather than claiming
+    there is no folder -- which sent the reader looking in the wrong place."""
+    subs = module_on_disk / "assessments" / "cw1" / "submissions"
+    import shutil
+
+    shutil.rmtree(subs)
+    subs.mkdir()
+
+    names = dashboard(module_on_disk)
+    reasons = names["blocking"]("submissions")
+
+    assert reasons and "no student folders" in reasons[0]
+    assert "there is no submissions folder" not in reasons[0]
