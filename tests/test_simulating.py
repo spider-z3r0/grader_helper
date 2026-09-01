@@ -30,6 +30,7 @@ from grader_helper import (
 )
 from grader_helper.simulating import (
     BOUNDARY_MARKS,
+    grade_cell_value,
     draw_marks,
     feedback_sheets,
     simulate_marking,
@@ -585,3 +586,94 @@ def test_a_clean_run_refuses_nothing(cw1):
     result = simulate_marking(cw1, seed=1)
 
     assert result.refused == {}
+
+
+# ---------------------------------------------------------------------------
+# A rubric that calculates its own total
+# ---------------------------------------------------------------------------
+#
+# Every sheet in this suite had an EMPTY grade cell, because that is what
+# fake_module writes. A real rubric calculates the total from criterion
+# cells, so the moment Excel saves it the grade cell caches a result --
+# usually 0, the sum of criteria nobody has filled in. "Holds a number"
+# then means every distributed sheet looks marked, and a run that means to
+# fill them all in skips every one of them while still filling the grader
+# workbooks.
+
+
+def _make_rubric_calculate(module, assessment_id="cw1", total=0):
+    """Give the blank rubric and every distributed sheet a cached total."""
+    from openpyxl import load_workbook
+
+    assessment = module.assessment(assessment_id)
+    targets = [assessment.rubric_path]
+    for paths in feedback_sheets(assessment).values():
+        targets.extend(paths)
+    for path in targets:
+        workbook = load_workbook(path)
+        workbook.worksheets[0][assessment.grade_cell] = total
+        workbook.save(path)
+    return assessment
+
+
+def test_a_calculated_zero_is_not_a_mark(ready_to_mark):
+    """The one that stopped it working on a real module."""
+    cw1 = _make_rubric_calculate(ready_to_mark)
+
+    result = simulate_marking(cw1, seed=1)
+
+    assert result.sheets, "every sheet was skipped as already marked"
+    assert not result.skipped
+    received = catch_grades(cw1.submissions_path, cw1.grade_cell)
+    assert (received["grade"] != 0).any(), "the sheets still read as blank"
+
+
+def test_a_mark_a_grader_wrote_is_still_left_alone(ready_to_mark):
+    """The rule it must not break: a sheet showing something OTHER than the
+    blank one is somebody's marking."""
+    cw1 = _make_rubric_calculate(ready_to_mark)
+    marked = next(iter(feedback_sheets(cw1).values()))[0]
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(marked)
+    workbook.worksheets[0][cw1.grade_cell] = 63.0
+    workbook.save(marked)
+
+    result = simulate_marking(cw1, seed=1)
+
+    assert marked not in [p for ps in result.sheets.values() for p in ps]
+    assert grade_cell_value(marked, cw1.grade_cell) == 63.0
+
+
+def test_the_grader_copies_what_is_on_the_sheet_not_what_was_drawn(
+    ready_to_mark,
+):
+    """A skipped sheet keeps the mark it already had, and that is the mark
+    the grader copies. Reporting the drawn one instead would reconcile as a
+    disagreement the simulator invented."""
+    cw1 = _make_rubric_calculate(ready_to_mark)
+    identifier, paths = next(iter(feedback_sheets(cw1).items()))
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(paths[0])
+    workbook.worksheets[0][cw1.grade_cell] = 63.0
+    workbook.save(paths[0])
+
+    simulate_marking(cw1, seed=1)
+
+    _, reported = _both_records(cw1)
+    theirs = reported.loc[reported["Student ID"] == identifier, "Mark"]
+    assert theirs.iloc[0] == 63.0
+
+
+def test_without_a_blank_any_number_still_counts(ready_to_mark):
+    """Pointed at folders with no rubric named, the old rule stands -- and
+    is right for a sheet this package wrote, whose grade cell is empty."""
+    from grader_helper.simulating import simulate_marking_in
+
+    cw1 = _make_rubric_calculate(ready_to_mark)
+
+    result = simulate_marking_in(cw1.submissions_path, cw1.grade_cell, seed=1)
+
+    assert not result.sheets
+    assert result.skipped

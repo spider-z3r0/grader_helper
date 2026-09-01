@@ -284,7 +284,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 706 tests on Linux and 707 with a real Excel:
+Done, 710 tests on Linux and 711 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -2029,6 +2029,32 @@ NG, not F), and the halves Python and Excel round in opposite directions.
 `round(64.5)` is 64 and Excel's is 65, and 64 is a B3 where 65 is a B2. A
 cohort with no exact halves in it never tests the rule this project has a
 house note about.
+
+#### "Holds a number" is not "has been marked"
+
+Every feedback sheet in the suite had an **empty** grade cell, because that
+is what `fake_module` writes. A real rubric *calculates* its total from
+criterion cells, so the moment Excel saves it the grade cell caches a result
+— usually `0`, the sum of criteria nobody has filled in yet.
+
+`_already_marked` asked "is there a number here", which is true of every
+distributed sheet from the moment it is distributed. So a run over a real
+module skipped **all** of them, silently, while still filling the grader
+workbooks — the exact shape of the failure this package spends its guards
+on, because the result is plausible: marks in the department's record and
+none on the sheets the students receive.
+
+The test is now "is it a *different* number from the one the blank sheet
+has", with the blank rubric read once per run. `assessment.rubric_path`
+supplies it; `--blank` does for the folder form. Without one it falls back
+to the old rule, which is right for a sheet this package wrote.
+
+Two things fell out of getting that right. **What the grader copies is what
+is on the sheet**, not what was drawn: a skipped sheet keeps the mark it
+already had, and reporting the drawn one instead would reconcile as a
+disagreement the simulator invented rather than one it found. And a
+discrepancy can only be planted on a sheet that was actually written, for
+the same reason.
 
 **A sheet that will not take a mark is reported, not raised.** A run over a
 real cohort writes eighty-odd files; dying on the fortieth leaves half of

@@ -219,27 +219,47 @@ def grader_workbooks(
     }
 
 
-def _already_marked(path: pl.Path, cell: str) -> bool:
-    """Whether the grade cell already holds a number.
+def grade_cell_value(path: pl.Path, cell: str):
+    """The cached value in a workbook's grade cell, or None.
 
-    A formula with no cached result reads as ``None`` here, which is what an
-    unmarked sheet written by this package looks like. A sheet somebody has
-    actually marked in Excel has a number cached, and is left alone.
+    Cached, because that is what ``catch_grades`` reads too. A formula that
+    Excel has never evaluated has no cached result and comes back None; one
+    it has comes back as whatever it last computed.
     """
     workbook = None
     try:
         workbook = load_workbook(path, data_only=True, read_only=True)
-        value = workbook.worksheets[0][cell].value
+        return workbook.worksheets[0][cell].value
     except Exception:
-        # Unreadable is not "already marked" -- let the write attempt say so.
-        return False
+        return None
     finally:
         if workbook is not None:
             try:
                 workbook.close()
             except Exception:
                 pass
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _is_a_mark(value, blank=None) -> bool:
+    """Whether a grade cell holds a mark somebody put there.
+
+    **"Holds a number" is not enough.** A real rubric *calculates* its total,
+    so the moment Excel saves it the grade cell caches a result -- usually
+    ``0``, the sum of criteria nobody has filled in yet. Every distributed
+    sheet then looks marked, and a run that means to fill them all in skips
+    every one of them, quietly, while still filling the grader workbooks. So
+    the test is not "is there a number" but "is it a *different* number from
+    the one the blank sheet has".
+
+    Without a blank to compare -- pointed at folders, with no rubric named --
+    it falls back to any number, which is the old rule and is right for a
+    sheet written by this package, whose blank grade cell is empty.
+    """
+    if value is None or isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    if blank is not None and value == blank:
+        return False
+    return True
 
 
 def draw_marks(
@@ -361,6 +381,7 @@ def simulate_marking_in(
     *,
     workbooks: pl.Path | None = None,
     graders: "Sequence[str] | None" = None,
+    blank: pl.Path | None = None,
     marks_out_of: float = 100,
     seed: int | None = None,
     boundaries: int = 3,
@@ -393,6 +414,11 @@ def simulate_marking_in(
     graders : sequence of str, optional
         Whose workbooks to fill. Left out, every workbook in ``workbooks``
         is taken to be a grader's -- see :func:`grader_workbooks`.
+    blank : pathlib.Path, optional
+        The blank feedback sheet. A distributed sheet whose grade cell still
+        shows what this one shows has not been marked, however much of a
+        number it is. Without it, any number counts as a mark -- see
+        :func:`_is_a_mark`.
     marks_out_of : float
         The scale to draw on. The distribution and the planted boundary
         marks are both fractions of it.
@@ -442,27 +468,23 @@ def simulate_marking_in(
             f"{len(drawn)} mark(s) to spoil."
         )
 
-    # The mistyped copy: the sheet says one thing, the workbook another.
-    # Done here rather than by nudging the sheet afterwards so that the
-    # *sheet* stays the record the student received, which is what it is.
-    reported = dict(drawn)
-    planted: dict[str, tuple[float, float]] = {}
-    for identifier in rng.sample(sorted(drawn), discrepancies):
-        # A transposition-sized slip, and never off the end of the scale.
-        slip = rng.choice([-10, -9, -2, -1, 1, 2, 9, 10])
-        wrong = min(max(drawn[identifier] + slip, 0.0), marks_out_of)
-        if wrong == drawn[identifier]:
-            wrong = min(drawn[identifier] + 1, marks_out_of)
-        reported[identifier] = wrong
-        planted[identifier] = (drawn[identifier], wrong)
+    # What the blank sheet shows, so a sheet still showing it is unmarked.
+    blank_value = grade_cell_value(blank, grade_cell) if blank else None
 
     written: dict[str, list[pl.Path]] = {}
     skipped: dict[str, list[pl.Path]] = {}
     refused: dict[pl.Path, str] = {}
+    #: What ended up on each student's sheet -- the drawn mark where one was
+    #: written, and whatever was already there where it was not. This, not
+    #: the draw, is what a grader copies into their workbook.
+    on_sheet: dict[str, float] = {}
+
     for identifier, paths in sheets.items():
         for path in paths:
-            if not overwrite and _already_marked(path, grade_cell):
+            existing = grade_cell_value(path, grade_cell)
+            if not overwrite and _is_a_mark(existing, blank_value):
                 skipped.setdefault(identifier, []).append(path)
+                on_sheet.setdefault(identifier, existing)
                 continue
             if not dry_run:
                 try:
@@ -474,13 +496,26 @@ def simulate_marking_in(
                     refused[path] = f"{type(exc).__name__}: {exc}"
                     continue
             written.setdefault(identifier, []).append(path)
+            on_sheet[identifier] = drawn[identifier]
 
-    # Only the marks that actually reached a sheet go into the workbooks.
-    # A grader does not copy a mark they never wrote.
-    unwritten = {
-        identifier for identifier in sheets if identifier not in written
-    }
-    reported = {k: v for k, v in reported.items() if k not in unwritten}
+    # The mistyped copy: the sheet says one thing, the workbook another.
+    # Planted here rather than before the writing so that only marks that
+    # actually reached a sheet can be mistyped -- a slip against a sheet
+    # nothing was written to is a disagreement this tool invented rather
+    # than one it found.
+    reported = dict(on_sheet)
+    planted: dict[str, tuple[float, float]] = {}
+    spoilable = sorted(written)
+    if discrepancies > len(spoilable):
+        discrepancies = len(spoilable)
+    for identifier in rng.sample(spoilable, discrepancies):
+        # A transposition-sized slip, and never off the end of the scale.
+        slip = rng.choice([-10, -9, -2, -1, 1, 2, 9, 10])
+        wrong = min(max(on_sheet[identifier] + slip, 0.0), marks_out_of)
+        if wrong == on_sheet[identifier]:
+            wrong = min(on_sheet[identifier] + 1, marks_out_of)
+        reported[identifier] = wrong
+        planted[identifier] = (on_sheet[identifier], wrong)
 
     filled = (
         _fill_grader_workbooks(
@@ -495,9 +530,7 @@ def simulate_marking_in(
         sheets=written,
         skipped=skipped,
         workbooks=filled,
-        discrepancies={
-            k: v for k, v in planted.items() if k not in unwritten
-        },
+        discrepancies=planted,
         refused=refused,
         dry_run=dry_run,
     )
@@ -590,6 +623,7 @@ def simulate_marking(
         assessment.grade_cell,
         workbooks=assessment.grading_output_path,
         graders=[g.initials for g in assessment.graders],
+        blank=assessment.rubric_path,
         marks_out_of=assessment.marks_out_of,
         seed=seed,
         boundaries=boundaries,
@@ -682,6 +716,7 @@ def _run_on_folders(args, parser) -> int:
             args.cell,
             workbooks=args.workbooks,
             graders=graders,
+            blank=args.blank,
             marks_out_of=args.marks_out_of,
             seed=args.seed,
             boundaries=args.boundaries,
@@ -753,6 +788,12 @@ def main(argv: "Sequence[str] | None" = None) -> int:
         "--graders", default=None,
         help="Whose workbooks to fill, comma separated (KOM,SOB). Default: "
              "every workbook in --workbooks.",
+    )
+    folders.add_argument(
+        "--blank", type=pl.Path, default=None,
+        help="The blank feedback sheet. A distributed sheet still showing "
+             "what it shows has not been marked -- without it, any number in "
+             "the grade cell counts as a mark.",
     )
     folders.add_argument(
         "--marks-out-of", type=float, default=100,
