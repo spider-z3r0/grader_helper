@@ -284,7 +284,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 696 tests on Linux and 697 with a real Excel:
+Done, 699 tests on Linux and 700 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -1905,6 +1905,30 @@ The one-folder test is `len(folders) == 1 and any(p.is_dir() for p in
 folders[0].iterdir())`, not `len(folders) == 1`: a cohort of one, or the
 last folder left after resolving the others, is a student folder, and a
 student folder holds files rather than folders.
+
+#### The one place a test cannot reach
+
+The group panel's table was `sizes.rename("students").reset_index(names="group")`.
+`names=` is a **DataFrame** argument; `Series.reset_index` has never had it.
+It raised the moment somebody pressed the button, on the first real module
+it was run against, having passed every test in the suite.
+
+It passed because it sat **inside a button guard**. `the_steps` exists
+precisely so that does not happen -- its docstring says the work is there
+"so that it can be driven by something other than a click" -- and I put
+display logic in the guard anyway. Nothing in the suite executes a guard
+body: `App.run()` runs the cell, the guard is False, and the line inside is
+never touched.
+
+So the rule is not "test the buttons", which cannot be done. It is: **if a
+line can fail, it does not belong in a guard.** `group_sizes(membership)`
+sits in `the_steps` with everything else and has a test that builds the
+table. Reintroducing the broken line fails it.
+
+The same review turned up that the ids named in the sheets but not on the
+class list reached only the terminal, as a Python warning. That is the other
+half of a mistyped id, and it is not where somebody clicking a button is
+looking, so `collect_groups` returns them and the panel shows them.
 
 #### The crash it turned up
 

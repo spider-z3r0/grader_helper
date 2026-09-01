@@ -526,7 +526,9 @@ def test_the_groups_can_be_collected_from_the_buttons(
     names = dashboard(leader_managed_module)
     cw1 = names["found"].module.assessment("cw1")
 
-    membership, attached = names["collect_groups"](cw1, names["class_list"])
+    membership, attached, strangers = names["collect_groups"](
+        cw1, names["class_list"]
+    )
 
     assert cw1.group_membership_path.exists()
     assert membership.frame["Group"].nunique() == 2
@@ -754,7 +756,7 @@ def test_groups_can_be_collected_from_one_file(one_groups_file, dashboard):
     cw1 = names["found"].module.assessment("cw1")
     groups_file = one_groups_file / "assessments" / "cw1" / "groups.xlsx"
 
-    membership, attached = names["collect_groups"](
+    membership, attached, _ = names["collect_groups"](
         cw1, names["class_list"], source=groups_file
     )
 
@@ -803,8 +805,63 @@ def test_a_remembered_groups_file_then_collects_on_its_own(
     )
 
     again = dashboard(one_groups_file)
-    membership, _ = again["collect_groups"](
+    membership, _, _ = again["collect_groups"](
         again["found"].module.assessment("cw1"), again["class_list"]
     )
 
     assert membership.frame["Group"].nunique() == 2
+
+
+# ---------------------------------------------------------------------------
+# What the button then shows
+# ---------------------------------------------------------------------------
+#
+# The first version of the group table was `reset_index(names=...)`, a
+# DataFrame argument that Series has never had. It raised the moment somebody
+# pressed the button, having passed every test in the suite -- because it sat
+# inside a button guard, which is the one place a test cannot reach. The
+# shaping lives in the_steps now, with everything else that has to be
+# callable without a click.
+
+
+def test_the_group_table_can_actually_be_built(leader_managed_module, dashboard):
+    """The line that crashed. It is a table of groups and their sizes, and
+    building it is not something to find out about from a traceback."""
+    names = dashboard(leader_managed_module)
+    cw1 = names["found"].module.assessment("cw1")
+    membership, _, _ = names["collect_groups"](cw1, names["class_list"])
+
+    table = names["group_sizes"](membership)
+
+    assert list(table.columns) == ["group", "students"]
+    assert len(table) == membership.frame["Group"].nunique()
+    assert table["students"].sum() == len(membership.frame)
+
+
+def test_ids_in_the_sheets_but_not_enrolled_are_returned(
+    leader_managed_module, dashboard
+):
+    """A withdrawal, or a mistyped id. It reached only the terminal as a
+    warning, which is not where the person clicking the button is looking."""
+    import pandas as pd
+
+    names = dashboard(leader_managed_module)
+    cw1 = names["found"].module.assessment("cw1")
+    sheet = cw1.group_sheets_path / "Team 3.xlsx"
+    pd.DataFrame({"Student ID": ["99999999"]}).to_excel(sheet, index=False)
+
+    with pytest.warns(UserWarning):
+        _, _, strangers = names["collect_groups"](cw1, names["class_list"])
+
+    assert strangers == ["99999999"]
+
+
+def test_a_cohort_with_nobody_missing_reports_no_strangers(
+    leader_managed_module, dashboard
+):
+    names = dashboard(leader_managed_module)
+    cw1 = names["found"].module.assessment("cw1")
+
+    _, _, strangers = names["collect_groups"](cw1, names["class_list"])
+
+    assert strangers == []

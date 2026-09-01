@@ -1082,16 +1082,37 @@ def the_steps(found):
         Allocation does this too. Running it on its own first is where a
         mistyped id or a student left off every sheet shows up, and both are
         much cheaper to fix before the graders have workbooks.
+
+        Returns the membership, the class list with a Group column on it, and
+        the ids the sheets name who are **not enrolled**. That last one is
+        the other half of a mistyped id, and it reached only the terminal as
+        a warning -- which is not where the person clicking the button is
+        looking.
         """
         membership = build_group_membership(assessment, source=source)
-        # The join is where a student in no group is named, so do it here
-        # rather than leaving it to be found at allocation.
-        attached = (
-            attach_group_membership(class_list, membership.frame)
-            if class_list is not None
-            else None
-        )
-        return membership, attached
+        strangers = []
+        attached = None
+        if class_list is not None:
+            enrolled = set(class_list["Student ID"].astype(str))
+            strangers = sorted(
+                set(membership.frame["Student ID"].astype(str)) - enrolled
+            )
+            # The join is where a student in no group is named, so do it here
+            # rather than leaving it to be found at allocation.
+            attached = attach_group_membership(class_list, membership.frame)
+        return membership, attached, strangers
+
+    def group_sizes(membership):
+        """How many students are in each group, as a table to show.
+
+        Here rather than in the button guard because the guard is the one
+        place a test cannot reach -- and the first version of this line,
+        `reset_index(names=...)`, is a DataFrame argument that Series has
+        never had. It raised the moment somebody pressed the button, having
+        passed every test in the suite.
+        """
+        sizes = membership.frame["Group"].value_counts().sort_index()
+        return sizes.rename_axis("group").reset_index(name="students")
 
     def allocate_marking(assessment, class_list, replace: bool = False):
         # One call for all three kinds. It picks the allocator, collects a
@@ -1189,6 +1210,7 @@ def the_steps(found):
     return (
         allocate_marking,
         collect_groups,
+        group_sizes,
         remember_group_sheets,
         remember_class_list,
         collect_marks,
@@ -1316,8 +1338,8 @@ def groups_panel(chosen, class_list, loaded, groups_picker):
 
 @app.cell
 def do_catch_groups(
-    catch_groups, collect_groups, groups_where, chosen, class_list, attempt,
-    failed,
+    catch_groups, collect_groups, group_sizes, groups_where, chosen,
+    class_list, attempt, failed,
 ):
     if not (catch_groups.value and chosen is not None and chosen.group):
         caught_groups = mo.md("")
@@ -1329,8 +1351,7 @@ def do_catch_groups(
         if _error is not None:
             caught_groups = failed("Collecting the groups", _error)
         else:
-            _membership, _attached = _done
-            _sizes = _membership.frame["Group"].value_counts().sort_index()
+            _membership, _attached, _strangers = _done
             caught_groups = mo.vstack([
                 mo.md(
                     f"""
@@ -1343,12 +1364,15 @@ def do_catch_groups(
                      if _attached is not None
                      else "*Read a class list above to check every student "
                           "is in one.*"}
+
+                    {f"**{len(_strangers)} id(s) in the sheets are not on the "
+                     f"class list** and have been ignored: `{_strangers}`. "
+                     "Usually a withdrawal, or a mistyped id — a mistyped one "
+                     "shows up here and again as a student with no group."
+                     if _strangers else ""}
                     """
                 ),
-                mo.ui.table(
-                    _sizes.rename("students").reset_index(names="group"),
-                    selection=None,
-                ),
+                mo.ui.table(group_sizes(_membership), selection=None),
             ])
 
     caught_groups

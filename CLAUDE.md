@@ -67,6 +67,9 @@ where a session about it starts.
 
 ## House practices
 
+- **Nothing that can fail goes in a marimo button guard.** No test executes
+  a guard body, so a broken line there passes the whole suite and raises on
+  the first click. Put the work in `the_steps` and call it.
 - **Verify a guard by reintroducing the bug.** A test that has never been
   seen to fail is not yet a test. This catches bad tests, not just bad code —
   it has already caught two here.
