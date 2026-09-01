@@ -164,6 +164,14 @@ class Assessment(BaseModel):
         description="Folder of the module leader's own group sheets, relative "
         "to `folder`. Only read for group_source = 'module_leader'.",
     )
+    group_column: str | list[str] | None = Field(
+        default=None,
+        description="Which column holds the group, where more than one could "
+        "and they disagree. A list composes one key from several columns: "
+        "['Grp Code', 'Team'] over 2A and 1 gives '2A_1'. Left unset the "
+        "column is found automatically, and an ambiguity is refused rather "
+        "than guessed at.",
+    )
 
     # --------------------------------------------------------- quiz policy
     #
@@ -255,6 +263,12 @@ class Assessment(BaseModel):
                 "sheets of your own -- the download is the individual shape, "
                 "one folder and one feedback sheet per student, and marks may "
                 "differ within a group"
+            )
+        if self.group_column is not None and not self.group:
+            raise ValueError(
+                f"Assessment {self.id!r} sets group_column but group is "
+                "false, so nothing would read it. There is no group to find "
+                "a column for."
             )
         if self.group_source is not None and not self.group:
             raise ValueError(

@@ -59,10 +59,14 @@ from .file_operations.save_distributed_graders import (
 )
 from .file_operations.save_grader_sheets import GRADER_COLUMN, save_grader_sheets
 from .ingesting.collect_group_membership import (
+    AmbiguousGroupError,
     attach_group_membership,
     collect_group_membership,
 )
-from .ingesting.import_brightspace_classlist import find_group_column
+from .ingesting.import_brightspace_classlist import (
+    group_key,
+    resolve_group_column,
+)
 from .models import Assessment, GroupSource
 
 #: The column a grader writes their mark into. ``collating.MARK_COLUMN`` reads
@@ -125,7 +129,7 @@ def build_group_membership(
     *,
     save: bool = True,
     id_column: str | None = None,
-    group_column: str | None = None,
+    group_column: "str | Sequence[str] | None" = None,
 ) -> GroupMembership:
     """
     Collect a leader-managed assessment's group sheets into one table.
@@ -140,9 +144,11 @@ def build_group_membership(
         A bound assessment with ``group_source = "module_leader"``.
     save : bool
         Also write ``group_membership.csv`` into ``grading_output/``.
-    id_column, group_column : str, optional
+    id_column, group_column : str or sequence of str, optional
         Passed through to :func:`collect_group_membership` for sheets whose
-        columns are named unusually.
+        columns are named unusually. ``group_column`` defaults to the
+        assessment's own, so a module that has answered the question in
+        ``module.toml`` never has to answer it again here.
 
     Returns
     -------
@@ -174,7 +180,9 @@ def build_group_membership(
     sheets = assessment.group_sheets_path
     assert sheets is not None  # guaranteed by the check above
     frame = collect_group_membership(
-        sheets, id_column=id_column, group_column=group_column
+        sheets,
+        id_column=id_column,
+        group_column=_group_column_for(assessment, group_column),
     )
 
     if not save:
@@ -185,6 +193,18 @@ def build_group_membership(
     target.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(target, index=False)
     return GroupMembership(frame, target)
+
+
+def _group_column_for(
+    assessment: Assessment, override: "str | Sequence[str] | None"
+) -> "str | Sequence[str] | None":
+    """Which column holds the group: this call's answer, or the module's.
+
+    One definition, used by both the leader-managed and the Brightspace
+    path. Two fallbacks would each hide the other going missing, which is
+    exactly what happened when there were two.
+    """
+    return override if override is not None else assessment.group_column
 
 
 def _graders_for(assessment: Assessment, graders: Sequence[str] | None) -> list[str]:
@@ -217,7 +237,7 @@ def allocate_graders(
     seed: int | None = None,
     overwrite: bool = False,
     criteria: Sequence[str] | None = (MARK_COLUMN,),
-    group_column: str | None = None,
+    group_column: "str | Sequence[str] | None" = None,
     grader_column: str = GRADER_COLUMN,
 ) -> GraderAllocation:
     """
@@ -253,9 +273,10 @@ def allocate_graders(
         Empty columns appended to each grader's workbook for them to fill
         in. Defaults to one ``Mark`` column, which is what
         ``collate_module_marks`` reads back.
-    group_column : str, optional
-        The column holding the group, for a Brightspace-managed assessment
-        whose class list names it unusually.
+    group_column : str or sequence of str, optional
+        The column holding the group, overriding the assessment's own. A
+        sequence composes one key from several columns. Only read for a
+        group assessment.
     grader_column : str
         The column the allocation is written into.
 
@@ -318,6 +339,10 @@ def allocate_graders(
 
     grader_ids = _graders_for(assessment, graders)
     membership_path: pl.Path | None = None
+    # The assessment's own answer, unless this call overrides it. Resolved
+    # here for the Brightspace path; the leader-managed path hands the
+    # override down and lets build_group_membership resolve it the same way.
+    wanted_column = _group_column_for(assessment, group_column)
 
     if not assessment.group:
         allocated = assign_graders_individual(
@@ -332,7 +357,9 @@ def allocate_graders(
 
     else:
         if assessment.group_source is GroupSource.MODULE_LEADER:
-            membership = build_group_membership(assessment)
+            membership = build_group_membership(
+                assessment, group_column=group_column
+            )
             membership_path = membership.path
             with_groups = attach_group_membership(class_list, membership.frame)
             column = "Group"
@@ -341,7 +368,12 @@ def allocate_graders(
             # plainly rather than letting the allocator's own message talk
             # about a frame the caller did not build.
             try:
-                column = find_group_column(class_list.columns, group_column)
+                column = resolve_group_column(class_list, wanted_column)
+            except AmbiguousGroupError:
+                # Already says which columns and what to pass. Wrapping it
+                # in "this class list has no group column" would be a worse
+                # message about a different problem.
+                raise
             except ValueError as exc:
                 raise ValueError(
                     f"Assessment {assessment.id!r} has group_source = "
@@ -349,7 +381,14 @@ def allocate_graders(
                     f"list -- but this class list has none. {exc} Import it "
                     "with import_brightspace_classlist(..., group=True)."
                 ) from exc
+
             with_groups = class_list
+            if not isinstance(column, str):
+                # A composed key has to become a real column before anything
+                # can allocate over it or sort by it.
+                with_groups = class_list.copy()
+                with_groups["Group"] = group_key(class_list, column)
+                column = "Group"
 
         allocated = assign_graders_groups(
             with_groups,

@@ -38,11 +38,13 @@ import warnings
 
 from ..dependencies import pd, pl
 from .import_brightspace_classlist import (
+    AmbiguousGroupError,
     MissingGroupError,
     _check_for_missing_groups,
     _expand_solo_groups,
     _normalise_column,
-    find_group_column,
+    group_key,
+    resolve_group_column,
 )
 
 #: Column names accepted as "the student id", compared case-insensitively
@@ -170,9 +172,12 @@ def _read_one(
 
     # A group column inside the sheet wins over the sheet's own name: a
     # leader who wrote one meant it, and it is the only way to express two
-    # teams in one tab.
+    # teams in one sheet. An ambiguous one is not resolved by falling back
+    # to the sheet's name -- that would answer a question the leader has to.
     try:
-        groups = find_group_column(frame.columns, group_column)
+        groups = resolve_group_column(frame, group_column)
+    except AmbiguousGroupError as exc:
+        raise AmbiguousGroupError(f"{where}: {exc}") from exc
     except ValueError:
         if group_column is not None:
             raise
@@ -182,7 +187,7 @@ def _read_one(
         {
             "Student ID": frame[ids].astype(str).str.strip().str.replace("#", ""),
             "Group": (
-                frame[groups].astype(str).str.strip()
+                group_key(frame, groups).str.strip()
                 if groups is not None
                 else implied_group.strip()
             ),
@@ -212,9 +217,12 @@ def collect_group_membership(
     id_column : str, optional
         The column holding the student id, when it is not one of the names
         recognised automatically -- see ``STUDENT_ID_ALIASES``.
-    group_column : str, optional
+    group_column : str or sequence of str, optional
         The column holding the group, for sheets that carry one. Given
-        explicitly, every sheet must have it.
+        explicitly, every sheet must have it. A sequence composes one key
+        from several columns -- ``["Grp Code", "Team"]`` over ``2A`` and
+        ``1`` gives ``2A_1`` -- which is what a sheet that never wrote the
+        combined column needs.
 
     Returns
     -------
@@ -231,6 +239,9 @@ def collect_group_membership(
         If there are no group sheets, or a sheet has no student id column.
     ConflictingGroupsError
         If a student appears in two different groups.
+    AmbiguousGroupError
+        If a sheet has several columns that could be the group and they
+        disagree about who is in a team with whom.
 
     Examples
     --------
@@ -367,9 +378,11 @@ def attach_group_membership(
 
     out = class_list.copy()
     out["Student ID"] = out["Student ID"].astype(str)
-    lookup = dict(
-        zip(membership["Student ID"].astype(str), membership["Group"].astype(str))
-    )
+    # The group is NOT stringified here. astype(str) turns a blank into the
+    # literal "nan", which is not blank, so the missing-group refusal below
+    # never fires and every student without a group is allocated together as
+    # a team called "nan" -- one grader, one mark, no error anywhere.
+    lookup = dict(zip(membership["Student ID"].astype(str), membership["Group"]))
     # Insert Group where the Brightspace group class list has it -- after the
     # names, before Score -- so the two kinds really do come out the same.
     group = out["Student ID"].map(lookup)
@@ -385,6 +398,7 @@ def attach_group_membership(
 
 
 __all__ = [
+    "AmbiguousGroupError",
     "ConflictingGroupsError",
     "MissingGroupError",
     "STUDENT_ID_ALIASES",

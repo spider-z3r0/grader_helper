@@ -22,6 +22,7 @@ import pandas as pd
 import pytest
 
 from grader_helper import (
+    AmbiguousGroupError,
     Module,
     allocate_graders,
     build_group_membership,
@@ -398,3 +399,78 @@ def test_an_unbound_assessment_will_not_be_allocated(classlist):
     )
     with pytest.raises(ValueError, match="does not know where it lives"):
         allocate_graders(a, classlist, GRADERS)
+
+
+# ---------------------------------------------------------------------------
+# Which column is the group
+# ---------------------------------------------------------------------------
+
+
+def _ml_sheet(folder, **columns):
+    folder.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(columns).to_excel(folder / "PS4001 groups.xlsx", index=False)
+
+
+def test_an_ambiguous_group_sheet_stops_the_allocation(tmp_path, classlist):
+    """Before graders have workbooks, and before anything is written."""
+    a = make_module(
+        tmp_path, group=True, group_source="module_leader"
+    ).assessment("cw1")
+    _ml_sheet(
+        a.group_sheets_path,
+        **{
+            "Student Id": [f"2330430{i}" for i in range(6)],
+            "Team": [1, 1, 2, 2, 1, 1],
+            "Grp Code": ["2A"] * 4 + ["2B"] * 2,
+            "Group": ["2A_1", "2A_1", "2A_2", "2A_2", "2B_1", "2B_1"],
+        },
+    )
+
+    with pytest.raises(AmbiguousGroupError, match="group_column="):
+        allocate_graders(a, classlist, seed=1)
+
+    assert not list(a.grading_output_path.glob("*.xlsx"))
+
+
+def test_the_assessment_can_answer_which_column(tmp_path, classlist):
+    """`group_column` in module.toml settles it once, so a leader whose
+    sheets always look like this never passes it again."""
+    a = make_module(
+        tmp_path, group=True, group_source="module_leader",
+        group_column="Group",
+    ).assessment("cw1")
+    _ml_sheet(
+        a.group_sheets_path,
+        **{
+            "Student Id": [f"2330430{i}" for i in range(6)],
+            "Team": [1, 1, 2, 2, 1, 1],
+            "Grp Code": ["2A"] * 4 + ["2B"] * 2,
+            "Group": ["2A_1", "2A_1", "2A_2", "2A_2", "2B_1", "2B_1"],
+        },
+    )
+
+    allocation = allocate_graders(a, classlist, seed=1)
+
+    assert sorted(allocation.frame["Group"].unique()) == ["2A_1", "2A_2", "2B_1"]
+    assert (allocation.frame.groupby("Group")["grader"].nunique() == 1).all()
+
+
+def test_a_composed_group_column_is_read_off_the_assessment(tmp_path, classlist):
+    """No combined column in the sheet at all -- 'Grp Code' and 'Team' are
+    only a group together, and team 1 of 2A is not team 1 of 2B."""
+    a = make_module(
+        tmp_path, group=True, group_source="module_leader",
+        group_column=["Grp Code", "Team"],
+    ).assessment("cw1")
+    _ml_sheet(
+        a.group_sheets_path,
+        **{
+            "Student Id": [f"2330430{i}" for i in range(6)],
+            "Team": [1, 1, 2, 2, 1, 1],
+            "Grp Code": ["2A"] * 4 + ["2B"] * 2,
+        },
+    )
+
+    allocation = allocate_graders(a, classlist, seed=1)
+
+    assert sorted(allocation.frame["Group"].unique()) == ["2A_1", "2A_2", "2B_1"]

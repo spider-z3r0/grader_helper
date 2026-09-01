@@ -21,6 +21,7 @@ import pandas as pd
 import pytest
 
 from grader_helper import (
+    AmbiguousGroupError,
     Assessment,
     ConflictingGroupsError,
     GroupSource,
@@ -91,6 +92,24 @@ def test_an_individual_assessment_stays_individual_by_default():
     assessment = Assessment(**_spec())
     assert assessment.group is False
     assert assessment.group_source is None
+
+
+def test_a_group_column_can_be_recorded_on_the_assessment():
+    """Asked once in module.toml, not on every run."""
+    one = Assessment(**_spec(group=True, group_source="module_leader",
+                             group_column="Group"))
+    composed = Assessment(**_spec(group=True, group_source="module_leader",
+                                  group_column=["Grp Code", "Team"]))
+
+    assert one.group_column == "Group"
+    assert composed.group_column == ["Grp Code", "Team"]
+
+
+def test_a_group_column_without_group_is_refused():
+    """Nothing would read it -- an individual assessment has no group to
+    find a column for."""
+    with pytest.raises(ValueError, match="group_column but group is"):
+        Assessment(**_spec(group_column="Group"))
 
 
 # ---------------------------------------------------------------------------
@@ -401,3 +420,128 @@ def test_a_student_in_the_sheets_but_not_the_class_list_is_flagged(
     with pytest.warns(UserWarning, match="23304355"):
         with pytest.raises(MissingGroupError, match="23304305"):
             attach_group_membership(six_student_classlist, membership)
+
+
+# ---------------------------------------------------------------------------
+# The module leader's real file: one sheet, several columns that look like
+# the group, and an id column in title case
+# ---------------------------------------------------------------------------
+#
+#   Name          Student Id   Team   Grp Code   Group
+#   LAST FIRST    12345678     1      2A         2A_1
+#   LAST2 FIRST2  12345679     1      2A         2A_1
+#   LAST3 FIRST3  12345680     2      2A         2A_2
+#   LAST4 FIRST4  12345681     1      2B         2B_1
+#
+# `Team`, `Grp Code` and `Group` are all recognised names, and Team and
+# Group are NOT the same partition: on Team the first and last students are
+# one team, on Group they are two.
+
+
+@pytest.fixture
+def ml_groups_file(tmp_path) -> pl.Path:
+    """The leader's own file, as it actually arrives."""
+    path = tmp_path / "PS4001 groups.xlsx"
+    pd.DataFrame(
+        {
+            "Name": [f"LAST{i} FIRST{i}" for i in range(4)],
+            "Student Id": ["12345678", "12345679", "12345680", "12345681"],
+            "Team": [1, 1, 2, 1],
+            "Grp Code": ["2A", "2A", "2A", "2B"],
+            "Group": ["2A_1", "2A_1", "2A_2", "2B_1"],
+        }
+    ).to_excel(path, index=False)
+    return path
+
+
+def test_a_title_case_id_column_still_joins(ml_groups_file):
+    """'Student Id' is not 'Student ID'. The frame has to come back with the
+    name everything downstream merges on, whatever the sheet called it."""
+    membership = collect_group_membership(ml_groups_file, group_column="Group")
+
+    assert list(membership.columns) == ["Student ID", "Group"]
+    assert sorted(membership["Student ID"]) == [
+        "12345678", "12345679", "12345680", "12345681"
+    ]
+
+
+def test_columns_that_disagree_are_refused_not_ranked(ml_groups_file):
+    """`Team` and `Group` are both recognised and they cut the cohort
+    differently. Alias order picks Group here and is right by luck; reorder
+    the tuple and two teams reach one grader as one team, with one mark."""
+    with pytest.raises(AmbiguousGroupError) as excinfo:
+        collect_group_membership(ml_groups_file)
+
+    message = str(excinfo.value)
+    assert "'Team'" in message and "'Group'" in message
+    assert "group_column=" in message
+    # Names the file, so a folder of sheets says which one.
+    assert "PS4001 groups.xlsx" in message
+
+
+def test_naming_the_column_settles_it(ml_groups_file):
+    membership = collect_group_membership(ml_groups_file, group_column="Group")
+
+    assert membership["Group"].tolist() == ["2A_1", "2A_1", "2A_2", "2B_1"]
+
+
+def test_a_group_key_can_be_composed_from_two_columns(tmp_path):
+    """The case with no combined column at all: 'Grp Code' and 'Team' are
+    only a group together. Alone, team 1 of 2A and team 1 of 2B are one."""
+    path = tmp_path / "groups.xlsx"
+    pd.DataFrame(
+        {
+            "Student Id": ["12345678", "12345679", "12345680"],
+            "Team": [1, 2, 1],
+            "Grp Code": ["2A", "2A", "2B"],
+        }
+    ).to_excel(path, index=False)
+
+    membership = collect_group_membership(
+        path, group_column=["Grp Code", "Team"]
+    )
+
+    assert membership["Group"].tolist() == ["2A_1", "2A_2", "2B_1"]
+
+
+def test_columns_that_agree_are_not_worth_asking_about(tmp_path):
+    """Two recognised columns that cut the cohort identically. Which one is
+    used cannot change a single allocation, so it is not a question."""
+    path = tmp_path / "groups.xlsx"
+    pd.DataFrame(
+        {
+            "Student Id": ["12345678", "12345679", "12345680"],
+            "Team": ["1", "1", "2"],
+            "Group": ["Team 1", "Team 1", "Team 2"],
+        }
+    ).to_excel(path, index=False)
+
+    membership = collect_group_membership(path)
+
+    assert membership["Group"].nunique() == 2
+
+
+def test_a_composed_key_with_a_blank_part_is_no_group_at_all(tmp_path):
+    """'2A_' is a group as far as everything downstream is concerned, so a
+    student missing a team stays visibly without one -- and is named by the
+    same refusal as a student left off the sheets entirely."""
+    path = tmp_path / "groups.csv"
+    pd.DataFrame(
+        {"Student Id": ["12345678", "12345679"],
+         "Grp Code": ["2A", "2A"],
+         "Team": ["1", None]}
+    ).to_csv(path, index=False)
+
+    membership = collect_group_membership(
+        path, group_column=["Grp Code", "Team"]
+    )
+
+    blank = membership.loc[membership["Student ID"] == "12345679", "Group"]
+    assert blank.isna().all(), "a half key is not a group"
+
+    class_list = pd.DataFrame(
+        {"Student ID": ["12345678", "12345679"],
+         "Last Name": ["A", "B"], "First Name": ["a", "b"], "Score": ["", ""]}
+    )
+    with pytest.raises(MissingGroupError, match="12345679"):
+        attach_group_membership(class_list, membership)

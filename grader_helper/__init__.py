@@ -28,11 +28,17 @@ from .ingesting.ingest_completed_graderfiles import (
     save_collated_grades,
 )
 from .ingesting.collect_group_membership import (
+    AmbiguousGroupError,
     ConflictingGroupsError,
     attach_group_membership,
     collect_group_membership,
 )
-from .ingesting.import_brightspace_classlist import MissingGroupError
+from .ingesting.import_brightspace_classlist import (
+    GROUP_KEY_SEPARATOR,
+    MissingGroupError,
+    group_key,
+    resolve_group_column,
+)
 from .ingesting.collect_quiz_marks import (
     DuplicateAttemptError,
     collect_quiz_marks,
@@ -142,8 +148,12 @@ __all__ = [
     "DuplicateAttemptError",
     "collect_group_membership",
     "attach_group_membership",
+    "AmbiguousGroupError",
     "ConflictingGroupsError",
     "MissingGroupError",
+    "GROUP_KEY_SEPARATOR",
+    "group_key",
+    "resolve_group_column",
     "extract_studentid_grade",
     "catch_grades",
     "excel_round",

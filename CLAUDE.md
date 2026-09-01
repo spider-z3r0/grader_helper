@@ -92,6 +92,11 @@ where a session about it starts.
   mark per team) and leader-managed (groups in the leader's own sheets, the
   ordinary per-student download). `group = true` without `group_source`
   refuses to load. See **Group assessments**.
+- **Which column is the group is decided by the data, not the name.** A
+  leader's sheet often has `Team`, `Grp Code` and `Group` all at once, and
+  they are different partitions. `resolve_group_column` refuses when
+  candidates disagree; `group_column` in `module.toml` answers it once, and
+  takes a list to compose a key (`["Grp Code", "Team"]` → `2A_1`).
 - `notebooks/grading_walkthrough.py` is deliberately plain and explicit, with
   each assessment written out in full. Do not "improve" it into a selector;
   that is scheduled, and not yet.

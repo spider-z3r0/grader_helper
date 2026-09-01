@@ -5,6 +5,8 @@ import pandas as pd
 import pathlib as pl
 import numpy as np
 
+from typing import Sequence
+
 
 def main():
     # Test the import_brightspace_classlist function
@@ -35,6 +37,22 @@ SOLO_ALIASES = ("solo", "individual", "alone", "on their own")
 
 #: Prefix given to the group of a student working alone.
 SOLO_PREFIX = "SOLO"
+
+
+#: Joins the parts of a composed group key: ``2A`` and ``1`` become ``2A_1``.
+#: Matches what a leader writes in their own combined column, which is where
+#: the convention comes from.
+GROUP_KEY_SEPARATOR = "_"
+
+
+class AmbiguousGroupError(ValueError):
+    """Raised when several columns could be the group and they disagree.
+
+    Its own type, and deliberately not resolved by alias order. Two columns
+    that cut the cohort differently are two different answers to "who is in
+    a team with whom", and the wrong one is silent: two teams reach one
+    grader as one team, with one mark between them.
+    """
 
 
 class MissingGroupError(ValueError):
@@ -96,8 +114,30 @@ def _expand_solo_groups(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _named(columns, group_column: str) -> str:
+    """One explicitly named column, matched leniently."""
+    lookup = {_normalise_column(c): c for c in columns}
+    found = lookup.get(_normalise_column(group_column))
+    if found is not None:
+        return found
+    raise ValueError(
+        f"No column named {group_column!r} in the class list. "
+        f"Columns present: {list(columns)}"
+    )
+
+
+def _candidates(columns) -> list[str]:
+    """Every column that could be the group, in alias order."""
+    lookup = {_normalise_column(c): c for c in columns}
+    return [lookup[alias] for alias in GROUP_COLUMN_ALIASES if alias in lookup]
+
+
 def find_group_column(columns, group_column: str | None = None) -> str:
     """Return the column in `columns` that holds the group/team name.
+
+    Names only. Where the frame is to hand, prefer
+    :func:`resolve_group_column`, which can also tell two candidate columns
+    apart -- something no amount of looking at names can do.
 
     Parameters
     ----------
@@ -113,20 +153,12 @@ def find_group_column(columns, group_column: str | None = None) -> str:
         If no candidate is found. The message names the columns that *are*
         present, so the user can see what to rename.
     """
-    lookup = {_normalise_column(c): c for c in columns}
-
     if group_column is not None:
-        found = lookup.get(_normalise_column(group_column))
-        if found is not None:
-            return found
-        raise ValueError(
-            f"No column named {group_column!r} in the class list. "
-            f"Columns present: {list(columns)}"
-        )
+        return _named(columns, group_column)
 
-    for alias in GROUP_COLUMN_ALIASES:
-        if alias in lookup:
-            return lookup[alias]
+    found = _candidates(columns)
+    if found:
+        return found[0]
 
     raise ValueError(
         "Could not find a group column in the class list. Looked for any of "
@@ -136,6 +168,133 @@ def find_group_column(columns, group_column: str | None = None) -> str:
         "which adds a 'Group Name' column, add one yourself, or pass "
         "group_column='<your column>'."
     )
+
+
+def _partition_size(frame: pd.DataFrame, columns: list[str]) -> int:
+    """How many groups these columns cut the frame into."""
+    return frame.groupby(columns, dropna=False).ngroups
+
+
+def resolve_group_column(
+    frame: pd.DataFrame, group_column: "str | Sequence[str] | None" = None
+) -> "str | list[str]":
+    """Decide which column, or columns, hold the group -- reading the data.
+
+    ``find_group_column`` sees only names, and names are not enough. A
+    module leader's own group sheet routinely carries several columns that
+    all look like the group:
+
+        Name   Student Id   Team   Grp Code   Group
+        ...    12345678     1      2A         2A_1
+        ...    12345681     1      2B         2B_1
+
+    ``Team`` and ``Group`` are both recognised, and **they are not the same
+    partition**: on ``Team`` those two students are one team, on ``Group``
+    they are two. Picking by alias order gets the right answer here only
+    because "group" happens to precede "team" in a tuple, and the wrong one
+    is silent -- two teams marked as one, by one grader, at one mark.
+
+    So when the candidates disagree, this refuses and says what to pass.
+    When they agree it does not matter which is used, and it does not ask.
+
+    Parameters
+    ----------
+    frame
+        The class list or group sheet. Read, not modified.
+    group_column
+        An explicit answer: one column name, or **several**, composed into
+        one key with :data:`GROUP_KEY_SEPARATOR` -- which is how a sheet
+        with ``Grp Code`` and ``Team`` but no combined column says
+        ``2A`` + ``1`` is ``2A_1``.
+
+    Returns
+    -------
+    str or list of str
+        The column, or the columns to compose. Hand it to :func:`group_key`.
+
+    Raises
+    ------
+    ValueError
+        If a named column is absent, or none is found at all.
+    AmbiguousGroupError
+        If several columns could be the group and they disagree about who
+        is in a team with whom.
+    """
+    if group_column is not None:
+        if isinstance(group_column, str):
+            return _named(frame.columns, group_column)
+        named = [_named(frame.columns, c) for c in group_column]
+        if not named:
+            raise ValueError(
+                "group_column is an empty sequence, so it names no column."
+            )
+        return named[0] if len(named) == 1 else named
+
+    found = _candidates(frame.columns)
+    if not found:
+        # Same message, and the same advice, as the names-only path.
+        return find_group_column(frame.columns)
+    if len(found) == 1:
+        return found[0]
+
+    # Several candidates. They only matter if they disagree: two columns cut
+    # the frame the same way iff their common refinement is no finer than
+    # either of them.
+    together = _partition_size(frame, found)
+    sizes = {column: _partition_size(frame, [column]) for column in found}
+    if all(size == together for size in sizes.values()):
+        return found[0]
+
+    listed = "\n".join(
+        f"  {column!r} makes {size} group(s)" for column, size in sizes.items()
+    )
+    finest = max(sizes, key=sizes.get)
+    raise AmbiguousGroupError(
+        "More than one column could be the group, and they disagree:\n"
+        + listed
+        + f"\n  together they make {together}\n\n"
+        "Which one decides who is in a team with whom is not something to "
+        "guess: the wrong choice puts two teams in front of one grader as "
+        "one team, with one mark between them, and nothing about the result "
+        "looks wrong. Say which you mean:\n"
+        f"  group_column={finest!r}\n"
+        "        one column already holds the whole key\n"
+        '  group_column=["Grp Code", "Team"]\n'
+        "        several columns composed into one, joined with "
+        f"{GROUP_KEY_SEPARATOR!r}, so 2A and 1\n"
+        f"        become {'2A' + GROUP_KEY_SEPARATOR + '1'!r}. Any columns "
+        "will do, not only the ones listed\n"
+        f"        above.\n\n"
+        f"Columns here: {list(frame.columns)}\n"
+        "For an assessment, set `group_column` in module.toml and it is "
+        "answered once."
+    )
+
+
+def group_key(frame: pd.DataFrame, columns: "str | Sequence[str]") -> pd.Series:
+    """One group label per row, from one column or several composed.
+
+    ``["Grp Code", "Team"]`` over ``2A`` and ``1`` gives ``2A_1`` -- the
+    label the leader would have written by hand, and the one their own
+    combined column usually holds.
+    """
+    if isinstance(columns, str):
+        columns = [columns]
+
+    parts = [frame[column] for column in columns]
+    # A blank part makes the whole key blank, not the string "nan" and not a
+    # half-key like "2A_". Both of those are groups as far as everything
+    # downstream is concerned, and a student with no group has to stay
+    # visibly without one -- that refusal is the only thing standing between
+    # them and being marked as a team of one, apart from their team.
+    blank = parts[0].isna() | parts[0].astype(str).str.strip().eq("")
+    for part in parts[1:]:
+        blank = blank | part.isna() | part.astype(str).str.strip().eq("")
+
+    key = parts[0].astype(str).str.strip()
+    for part in parts[1:]:
+        key = key + GROUP_KEY_SEPARATOR + part.astype(str).str.strip()
+    return key.mask(blank)
 
 
 def import_brightspace_classlist(
@@ -157,10 +316,12 @@ def import_brightspace_classlist(
     normalise : bool
         If True, lowercase the column names and replace spaces with
         underscores.
-    group_column : str | None
-        The name of the column holding the group. Only needed when it is not
-        one of the names recognised automatically -- see
-        GROUP_COLUMN_ALIASES.
+    group_column : str | Sequence[str] | None
+        The column holding the group. Only needed when it is not one of the
+        names recognised automatically -- see GROUP_COLUMN_ALIASES -- or
+        when several columns are recognised and they disagree. A sequence
+        composes one key from several columns, joined with
+        GROUP_KEY_SEPARATOR.
 
     Returns
     -------
@@ -186,8 +347,11 @@ def import_brightspace_classlist(
         # add the "Score" column
         classlist_df["Score"] = ""
         if group:
-            found = find_group_column(classlist_df.columns, group_column)
-            classlist_df = classlist_df.rename(columns={found: 'Group'})
+            # resolve_group_column, not find_group_column: it can see the
+            # data, so it can tell two candidate columns apart -- and refuse
+            # when they disagree -- which names alone cannot.
+            found = resolve_group_column(classlist_df, group_column)
+            classlist_df["Group"] = group_key(classlist_df, found)
             classlist_df = classlist_df[
                 ["Student ID", "Last Name", "First Name", "Group", "Score"]]
         else:
@@ -213,8 +377,8 @@ def import_brightspace_classlist(
         # Return the processed classlist DataFrame
         return classlist_df
 
-    except MissingGroupError:
-        # A data problem for the module leader to fix, not an import failure.
+    except (MissingGroupError, AmbiguousGroupError):
+        # Data problems for the module leader to fix, not import failures.
         raise
     except FileNotFoundError:
         print(f"Can not find file at {file.absolute()}")

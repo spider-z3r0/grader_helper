@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 611 tests on Linux and 612 with a real Excel:
+Done, 622 tests on Linux and 623 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -868,6 +868,64 @@ trailing blank rows, blank lines between teams, a leading `#` on ids pasted
 from a Brightspace export, `~$Team 1.xlsx` lock files from a workbook someone
 left open, an id column called almost anything.
 
+#### Which column is the group
+
+A leader's own file routinely carries several columns that all look like the
+group, and an id column named however they type it:
+
+```
+Name          Student Id   Team   Grp Code   Group
+LAST FIRST    12345678     1      2A         2A_1
+LAST4 FIRST4  12345681     1      2B         2B_1
+```
+
+`Student Id` is a non-issue — `_normalise_column` ignores case, spaces and
+underscores for the *lookup*, and the frame comes back with `Student ID`
+whatever the sheet said, because that is what everything downstream merges
+on.
+
+`Team` and `Group` are the problem, and it is not a naming problem. Both are
+recognised aliases, and **they are not the same partition**: on `Team` those
+two students are one team, on `Group` they are two. Alias order picks `Group`
+and is right here — by luck, because "group" precedes "team" in a tuple.
+Reorder the tuple and two teams reach one grader as one team, with one mark
+between them, and nothing about the result looks wrong.
+
+So `resolve_group_column` reads the **data**, not the names. It compares the
+partitions each candidate induces, and:
+
+- one candidate, or several that **agree** → use it, and do not ask; which
+  one is used cannot change a single allocation
+- several that **disagree** → refuse, saying how many groups each makes and
+  what to pass
+
+Two columns cut a frame the same way iff their common refinement is no finer
+than either of them, which is the whole test: `groupby(a).ngroups ==
+groupby([a, b]).ngroups == groupby(b).ngroups`.
+
+`group_column` accepts **a list**, composed into one key with
+`GROUP_KEY_SEPARATOR` (`_`): `["Grp Code", "Team"]` over `2A` and `1` gives
+`2A_1`. That is the sheet with no combined column at all, where `Team` alone
+merges team 1 of 2A with team 1 of 2B. The separator matches what a leader
+writes in their own combined column, which is where the convention comes
+from.
+
+**A blank part makes the whole key blank** — not `"nan"`, and not a half-key
+like `"2A_"`. Both of those are groups as far as everything downstream is
+concerned, and a student with no group has to stay visibly without one. The
+first version of `group_key` did `astype(str)` and turned `None` into
+`"nan"`; five existing tests caught it immediately. The same defect was
+already sitting in `attach_group_membership`, where it was **not** caught —
+every student without a group was being allocated together as a team called
+`nan`, one grader, one mark, no error anywhere. Found by writing the
+composed-key test, which is the argument for writing them.
+
+`Assessment.group_column` records the answer in `module.toml`, so a leader
+whose sheets always look like this answers once and never again. One helper,
+`_group_column_for`, resolves override-or-assessment for both the
+leader-managed and the Brightspace path — there were briefly two, and each
+hid the other going missing under mutation.
+
 Two refusals, both data problems for the leader:
 
 - **A student in two groups** raises `ConflictingGroupsError`, naming them
@@ -962,14 +1020,22 @@ Brightspace workbook, a per-group leader-managed one, groups allocated per
 student so teams split across graders, conflicting groups resolved by
 last-seen, the `Group` column appended rather than placed, the blank-row
 filter removed, `group_source` left out of `module.toml`, `groups/` created
-for every assessment, the form writing `group = true` with no source, and
-the class list asked for groups a leader-managed module has not got.
+for every assessment, the form writing `group = true` with no source, the
+class list asked for groups a leader-managed module has not got, an
+ambiguous group column resolved by alias order, a composed key ignoring all
+but its first column, `group_key` and `attach_group_membership`
+stringifying a blank into `"nan"`, and the allocation ignoring the
+assessment's own `group_column`.
 
-The last of those is the one worth recording: it **passed** the first time
-the mutation was run, because nothing yet drove the dashboard against a
-leader-managed module. The two tests in `test_dashboard_steps.py` that run
-one end to end were written because of that, and the mutation fails against
-them now. A guard nobody has watched fail is not yet a guard.
+Two of those **passed** the first time they were mutated, and both are
+worth recording. The class-list one passed because nothing yet drove the
+dashboard against a leader-managed module; the two end-to-end tests in
+`test_dashboard_steps.py` were written because of it. The `group_column`
+one passed because the fallback was written twice, once in
+`allocate_graders` and once in `build_group_membership`, so each masked the
+other's removal — the fix was one helper, not another test. A guard nobody
+has watched fail is not yet a guard, and a guard written twice is watched
+half as closely.
 
 ### Collating a module
 
