@@ -112,6 +112,10 @@ class SimulatedMarking(NamedTuple):
     #: ``{identifier: (on the sheet, in the workbook)}`` where the two were
     #: deliberately made to disagree -- the mistyped copy step 7 catches.
     discrepancies: dict[str, tuple[float, float]]
+    #: Sheets that would not take a mark, and why. Collected rather than
+    #: raised: a run over a real cohort writes eighty-odd files, and dying on
+    #: the fortieth leaves half of them marked with no record of which half.
+    refused: dict[pl.Path, str]
     #: True when nothing was written.
     dry_run: bool
 
@@ -126,6 +130,8 @@ class SimulatedMarking(NamedTuple):
         ]
         if self.discrepancies:
             parts.append(f"{len(self.discrepancies)} planted discrepancy(ies)")
+        if self.refused:
+            parts.append(f"**{len(self.refused)} would not take a mark**")
         return ", ".join(parts)
 
 
@@ -297,8 +303,38 @@ def draw_marks(
 
 
 def _write_sheet(path: pl.Path, cell: str, mark: float) -> None:
+    """Put a mark in the grade cell.
+
+    Raises
+    ------
+    ValueError
+        If the cell cannot take a value, with the reason in words. The one
+        that actually happens is a **merged** grade cell: openpyxl will only
+        write to the top-left of a merged range, and a rubric that merges the
+        total across two columns puts the grade cell somewhere else in it.
+        Worth naming, because "'MergedCell' object attribute 'value' is
+        read-only" is not a sentence about a feedback sheet.
+    """
     workbook = load_workbook(path)
-    workbook.worksheets[0][cell] = mark
+    sheet = workbook.worksheets[0]
+    target = sheet[cell]
+
+    if type(target).__name__ == "MergedCell":
+        anchor = next(
+            (
+                str(rng).split(":")[0]
+                for rng in sheet.merged_cells.ranges
+                if target.coordinate in rng
+            ),
+            None,
+        )
+        raise ValueError(
+            f"{cell} is inside a merged range, so only {anchor} can be "
+            f"written. Either put the mark cell at {anchor} in module.toml, "
+            "or unmerge it in the blank feedback sheet."
+        )
+
+    target.value = mark
     workbook.save(path)
 
 
@@ -422,14 +458,29 @@ def simulate_marking_in(
 
     written: dict[str, list[pl.Path]] = {}
     skipped: dict[str, list[pl.Path]] = {}
+    refused: dict[pl.Path, str] = {}
     for identifier, paths in sheets.items():
         for path in paths:
             if not overwrite and _already_marked(path, grade_cell):
                 skipped.setdefault(identifier, []).append(path)
                 continue
             if not dry_run:
-                _write_sheet(path, grade_cell, drawn[identifier])
+                try:
+                    _write_sheet(path, grade_cell, drawn[identifier])
+                except Exception as exc:
+                    # One unwritable sheet is not a reason to abandon the
+                    # other eighty, and which ones failed is the thing worth
+                    # knowing afterwards.
+                    refused[path] = f"{type(exc).__name__}: {exc}"
+                    continue
             written.setdefault(identifier, []).append(path)
+
+    # Only the marks that actually reached a sheet go into the workbooks.
+    # A grader does not copy a mark they never wrote.
+    unwritten = {
+        identifier for identifier in sheets if identifier not in written
+    }
+    reported = {k: v for k, v in reported.items() if k not in unwritten}
 
     filled = (
         _fill_grader_workbooks(
@@ -444,7 +495,10 @@ def simulate_marking_in(
         sheets=written,
         skipped=skipped,
         workbooks=filled,
-        discrepancies=planted,
+        discrepancies={
+            k: v for k, v in planted.items() if k not in unwritten
+        },
+        refused=refused,
         dry_run=dry_run,
     )
 
@@ -651,6 +705,8 @@ def _report(result: SimulatedMarking, label: str = "") -> None:
     print(f"  {label}{result}")
     for identifier, (sheet, workbook) in sorted(result.discrepancies.items()):
         print(f"      planted: {identifier} sheet {sheet} vs workbook {workbook}")
+    for path, why in sorted(result.refused.items()):
+        print(f"      refused: {path.parent.name}/{path.name} -- {why}")
 
 
 def main(argv: "Sequence[str] | None" = None) -> int:

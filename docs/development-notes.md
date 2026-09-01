@@ -284,7 +284,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 702 tests on Linux and 703 with a real Excel:
+Done, 706 tests on Linux and 707 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -2029,6 +2029,21 @@ NG, not F), and the halves Python and Excel round in opposite directions.
 `round(64.5)` is 64 and Excel's is 65, and 64 is a B3 where 65 is a B2. A
 cohort with no exact halves in it never tests the rule this project has a
 house note about.
+
+**A sheet that will not take a mark is reported, not raised.** A run over a
+real cohort writes eighty-odd files; dying on the fortieth leaves half of
+them marked with no record of which half, which is worse than any one sheet
+failing. The one that actually happens is a **merged** grade cell -- openpyxl
+writes only to the top-left of a merged range, and a rubric that spreads the
+total across two columns puts the grade cell elsewhere in it. The message
+names the cell that *can* be written rather than passing on `'MergedCell'
+object attribute 'value' is read-only`, which is not a sentence about a
+feedback sheet.
+
+A mark that never reached a sheet is then **left out of the grader's
+workbook too**. A grader does not copy a mark they never wrote, and leaving
+it in would reconcile as a disagreement -- an empty sheet against a workbook
+mark -- which is a fault the simulator invented rather than one it found.
 
 Three things it will not do to a module:
 

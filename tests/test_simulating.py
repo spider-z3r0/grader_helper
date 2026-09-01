@@ -520,3 +520,68 @@ def test_neither_a_module_nor_folders_is_refused():
 
     with pytest.raises(SystemExit):
         main([])
+
+
+# ---------------------------------------------------------------------------
+# A sheet that will not take a mark
+# ---------------------------------------------------------------------------
+#
+# A run over a real cohort writes eighty-odd files. Dying on the fortieth
+# leaves half of them marked with no record of which half, which is worse
+# than any one sheet failing.
+
+
+def _merge_the_grade_cell(path, cell="D30"):
+    """Merge the grade cell into a range it is not the top-left of, which is
+    what a rubric that spreads the total across two columns does."""
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(path)
+    column, row = cell[0], cell[1:]
+    workbook.worksheets[0].merge_cells(f"{chr(ord(column) - 1)}{row}:{cell}")
+    workbook.save(path)
+
+
+def test_a_merged_grade_cell_is_reported_not_raised(cw1):
+    sheets = feedback_sheets(cw1)
+    first = next(iter(sheets.values()))[0]
+    _merge_the_grade_cell(first, cw1.grade_cell)
+
+    result = simulate_marking(cw1, seed=1)
+
+    assert list(result.refused) == [first]
+    assert "merged" in result.refused[first]
+    assert "would not take a mark" in str(result)
+
+
+def test_the_other_sheets_are_still_marked(cw1):
+    """The point of collecting rather than raising."""
+    sheets = feedback_sheets(cw1)
+    first = next(iter(sheets.values()))[0]
+    _merge_the_grade_cell(first, cw1.grade_cell)
+
+    result = simulate_marking(cw1, seed=1)
+
+    written = sum(len(paths) for paths in result.sheets.values())
+    assert written == sum(len(p) for p in sheets.values()) - 1
+
+
+def test_a_mark_that_never_reached_a_sheet_is_not_reported_by_the_grader(cw1):
+    """A grader does not copy a mark they never wrote. Left in, the student
+    would reconcile as a disagreement -- an empty sheet against a workbook
+    mark -- which is a fault this tool invented, not one it found."""
+    sheets = feedback_sheets(cw1)
+    identifier, paths = next(iter(sheets.items()))
+    _merge_the_grade_cell(paths[0], cw1.grade_cell)
+
+    simulate_marking(cw1, seed=1)
+
+    _, reported = _both_records(cw1)
+    theirs = reported.loc[reported["Student ID"] == identifier, "Mark"]
+    assert theirs.isna().all(), "a mark was reported for an unmarked sheet"
+
+
+def test_a_clean_run_refuses_nothing(cw1):
+    result = simulate_marking(cw1, seed=1)
+
+    assert result.refused == {}
