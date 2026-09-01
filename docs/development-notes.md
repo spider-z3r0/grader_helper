@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 658 tests on Linux and 659 with a real Excel:
+Done, 670 tests on Linux and 671 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -1766,6 +1766,62 @@ somewhere — an all-caps surname alone is not enough to trip it.
 because by the time the restore refuses, the append has already happened. The
 only real recovery is to delete the log and re-download; nothing can
 reconstruct a name that was overwritten.
+
+### The two steps the page was missing
+
+Run against a real module, the marking page had no way to do three of the
+things a leader actually does first. Two were genuinely absent and the third
+was a symptom of the first.
+
+**Reading the class list.** It was read silently by a cell, and every
+marking step is blocked behind it. A path in `module.toml` that is wrong --
+or a file that has not been downloaded yet -- therefore left the page with
+nothing to do and no way forward except hand-editing the toml, which is the
+thing the app exists to replace. There is now a file browser beside it, and
+**picked wins over remembered**: the remembered value being wrong is the
+whole reason the control exists, so it cannot be the one that always wins.
+`Remember this class list in module.toml` writes it back, relative to the
+module folder -- an absolute path is refused, because these folders live
+under OneDrive where it differs per machine.
+
+That write has one honest limit. `ModuleFile.save` updates keys already in
+the file and does not add new ones, because appending to a table moves the
+comment that follows it. So a module with no `classlist` line under
+`[paths]` gets a refusal naming the line to add by hand, rather than a save
+that reports success and changed nothing.
+
+**Collecting the groups.** Nothing ran `build_group_membership`. The panel
+now shows the sheets it can see and collects them, and the join against the
+class list runs with it -- which is where a mistyped id or a student left
+off every sheet is named, and both are much cheaper to fix before the
+graders have workbooks. For a Brightspace-managed assessment there is
+nothing to collect and it says so, reporting instead whether the group
+column arrived in the class list. **The step appears only for a group
+assessment**: a dead button on an individual one would say there is
+something to do.
+
+**Allocating.** This button was already there. It was blocked behind the
+class list, which is the first item above; the fix was that one, not a
+second button. `blocking` gained one reason of its own -- a leader-managed
+group assessment with no sheets folder now says so up front rather than
+failing inside the step.
+
+#### The crash it turned up
+
+`import_brightspace_classlist` returns `None` rather than raising for a file
+it cannot make sense of, and the page did `len(frame)` on the result. A real
+class list that would not parse -- the wrong export, a spreadsheet of
+something else -- took the **whole page** down with a `TypeError`, which is
+the one thing a step may not do. Handled, and covered.
+
+Both new actions live in `the_steps` with the others, for the reason given
+there: a test cannot click, but it can call exactly what a click calls. The
+file-browser selection cannot be driven that way at all, so the choice it
+feeds is a returned function (`class_list_choice`) and the test drives that
+instead. Six guards verified by reintroducing the bug: the picked class list
+ignored, the unparseable one unhandled, an absolute path written to
+`module.toml`, a no-op save reported as success, the group join skipped, and
+missing group sheets not blocking allocation.
 
 ### Simulating the marking
 

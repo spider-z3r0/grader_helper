@@ -19,6 +19,7 @@ House convention: ``pl`` is pathlib, ``pr`` is polars.
 """
 
 import importlib.util
+import pathlib as pl
 import shutil
 import sys
 
@@ -154,7 +155,6 @@ def test_a_leader_managed_group_assessment_allocates_from_the_buttons(
     go to one marker, and every student still gets a row to be marked on."""
     names = dashboard(leader_managed_module)
     cw1 = names["found"].module.assessment("cw1")
-    graders = [g.initials for g in cw1.graders]
 
     master, workbooks, allocation = names["allocate_marking"](
         cw1, names["class_list"]
@@ -409,3 +409,188 @@ def test_the_sample_can_be_drawn_again_from_its_own_seed(marked_module, dashboar
     again = names["draw_the_sample"](sheet, 1, "include", seed=first.seed)
 
     assert list(again.selected["Student ID"]) == list(first.selected["Student ID"])
+
+
+# ---------------------------------------------------------------------------
+# The class list, and the steps that wait on it
+# ---------------------------------------------------------------------------
+#
+# Every marking step is blocked until the class list reads, so a wrong path
+# in module.toml left the page with nothing to do and no way forward except
+# hand-editing the file -- which is the thing the app is meant to replace.
+
+
+def _point_classlist_at(root, name):
+    """Rewrite [paths].classlist, as a hand edit would."""
+    toml = root / "module.toml"
+    text = toml.read_text(encoding="utf-8")
+    import re
+
+    text = re.sub(r'classlist = "[^"]*"', f'classlist = "{name}"', text)
+    toml.write_text(text, encoding="utf-8")
+    return toml
+
+
+def test_a_missing_class_list_does_not_stop_the_page(module_on_disk, dashboard):
+    """It is the ordinary state before the export has been downloaded."""
+    _point_classlist_at(module_on_disk, "not there.csv")
+
+    names = dashboard(module_on_disk)
+
+    assert names["class_list"] is None
+    assert names["class_list_path"].name == "not there.csv"
+    assert names["classlist_picker"] is not None, "and there is a way forward"
+
+
+def test_a_class_list_that_will_not_parse_does_not_crash_the_page(
+    module_on_disk, dashboard
+):
+    """import_brightspace_classlist returns None rather than raising for a
+    file it cannot make sense of. Reading len(None) took the whole page down
+    with a TypeError, which is the one thing a step may not do."""
+    (module_on_disk / "rubbish.csv").write_text("not,a,class,list\n1,2,3,4\n")
+    _point_classlist_at(module_on_disk, "rubbish.csv")
+
+    names = dashboard(module_on_disk)
+
+    assert names["class_list"] is None
+
+
+def test_a_good_class_list_still_reads(module_on_disk, dashboard):
+    names = dashboard(module_on_disk)
+
+    assert names["class_list"] is not None
+    assert len(names["class_list"]) > 0
+
+
+def test_a_class_list_can_be_recorded_in_the_module_file(module_on_disk, dashboard):
+    _point_classlist_at(module_on_disk, "not there.csv")
+    names = dashboard(module_on_disk)
+
+    written = names["remember_class_list"](module_on_disk / "classlist.xlsx")
+
+    assert written == pl.Path("classlist.xlsx")
+    assert 'classlist = "classlist.xlsx"' in (
+        module_on_disk / "module.toml"
+    ).read_text(encoding="utf-8")
+    # And the module now loads with it.
+    assert ModuleFile.load(module_on_disk).module.classlist_path.exists()
+
+
+def test_a_class_list_outside_the_module_folder_is_refused(
+    module_on_disk, dashboard, tmp_path
+):
+    """module.toml stores nothing absolute -- these folders live under
+    OneDrive, where the absolute path differs per machine."""
+    stray = tmp_path / "elsewhere.csv"
+    stray.write_text("Username,Last Name,First Name\n#1,A,a\n")
+    names = dashboard(module_on_disk)
+
+    with pytest.raises(ValueError, match="outside the module folder"):
+        names["remember_class_list"](stray)
+
+
+def test_a_module_file_with_no_classlist_line_says_to_add_one(
+    module_on_disk, dashboard
+):
+    """`save` updates keys already in the file and does not add new ones --
+    appending to a table moves the comment that follows it. A save that
+    silently changed nothing would be worse than a refusal."""
+    toml = module_on_disk / "module.toml"
+    text = toml.read_text(encoding="utf-8")
+    import re
+
+    toml.write_text(re.sub(r'classlist = "[^"]*"\n', "", text), encoding="utf-8")
+    names = dashboard(module_on_disk)
+
+    with pytest.raises(ValueError, match="by hand"):
+        names["remember_class_list"](module_on_disk / "classlist.xlsx")
+
+
+# ---------------------------------------------------------------------------
+# Collecting the groups from the page
+# ---------------------------------------------------------------------------
+
+
+def test_the_groups_can_be_collected_from_the_buttons(
+    leader_managed_module, dashboard
+):
+    """The step where a mistyped id shows up, before the graders have
+    workbooks rather than after."""
+    names = dashboard(leader_managed_module)
+    cw1 = names["found"].module.assessment("cw1")
+
+    membership, attached = names["collect_groups"](cw1, names["class_list"])
+
+    assert cw1.group_membership_path.exists()
+    assert membership.frame["Group"].nunique() == 2
+    assert "Group" in attached.columns
+
+
+def test_a_student_left_off_the_sheets_is_named_here(
+    leader_managed_module, dashboard
+):
+    """Rather than at allocation, which is after the graders have workbooks."""
+    names = dashboard(leader_managed_module)
+    # Imported AFTER the run, not before. The dashboard fixture drops
+    # grader_helper from sys.modules so the notebook imports the real
+    # package rather than the repo-root shim, which means a class imported
+    # up here is a different object from the one the notebook raises, and
+    # pytest.raises would not match it.
+    from grader_helper import MissingGroupError
+
+    cw1 = names["found"].module.assessment("cw1")
+    (cw1.group_sheets_path / "Team 2.xlsx").unlink()
+
+    with pytest.raises(MissingGroupError):
+        names["collect_groups"](cw1, names["class_list"])
+
+
+def test_allocation_says_when_there_are_no_group_sheets(
+    leader_managed_module, dashboard
+):
+    """Up front, rather than as a traceback from inside the step."""
+    names = dashboard(leader_managed_module)
+    cw1 = names["found"].module.assessment("cw1")
+    for sheet in cw1.group_sheets_path.iterdir():
+        sheet.unlink()
+    cw1.group_sheets_path.rmdir()
+
+    again = dashboard(leader_managed_module)
+
+    assert "no sheets at" in again["blocking"]("group sheets")[0]
+
+
+def test_an_individual_assessment_has_no_group_sheets_to_miss(
+    module_on_disk, dashboard
+):
+    names = dashboard(module_on_disk)
+
+    assert names["blocking"]("group sheets") == []
+
+
+def test_a_picked_class_list_wins_over_the_remembered_one(module_on_disk, dashboard):
+    """A test cannot click a file browser, so this drives the choice the
+    browser feeds. Picked has to win: a wrong path in module.toml is the
+    whole reason the control exists."""
+    names = dashboard(module_on_disk)
+    choose = names["class_list_choice"]
+
+    assert choose(pl.Path("picked.csv"), pl.Path("remembered.csv")) == (
+        pl.Path("picked.csv"), "picked here",
+    )
+    assert choose(None, pl.Path("remembered.csv")) == (
+        pl.Path("remembered.csv"), "from module.toml",
+    )
+    assert choose(None, None) == (None, "from module.toml")
+
+
+def test_reading_a_class_list_from_a_path_given(module_on_disk, dashboard):
+    names = dashboard(module_on_disk)
+
+    frame, note = names["read_class_list"](
+        module_on_disk / "classlist.xlsx", names["found"].module
+    )
+
+    assert frame is not None and len(frame) > 0
+    assert "students" in note

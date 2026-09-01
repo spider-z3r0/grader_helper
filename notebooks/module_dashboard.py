@@ -21,6 +21,8 @@ with app.setup():
         write_departmental_sheet,
         write_si_marks,
         allocate_graders,
+        attach_group_membership,
+        build_group_membership,
         brightspace_name_folders,
         catch_grades,
         collect_quiz_marks,
@@ -728,13 +730,53 @@ def helpers():
 
 
 @app.cell
-def the_class_list(found, loaded):
-    def _read(module):
-        path = module.classlist_path
+def class_list_source(found, loaded):
+    # module.toml names the class list, and every marking step is blocked
+    # behind reading it. A path that is wrong, or a file that has not arrived
+    # yet, therefore left the page with nothing to do and no way forward
+    # except hand-editing the toml -- which is the thing this is meant to
+    # replace. So: pick one here instead.
+    classlist_picker = mo.ui.file_browser(
+        initial_path=found.module.root if loaded else pl.Path.home(),
+        selection_mode="file",
+        multiple=False,
+        filetypes=[".csv", ".xlsx"],
+        label="**Class list** — pick a file to use instead of the one above",
+    )
+    remember_classlist = mo.ui.run_button(
+        label="Remember this class list in module.toml"
+    )
+
+    mo.vstack([classlist_picker, remember_classlist]) if loaded else mo.md("")
+    return classlist_picker, remember_classlist
+
+
+@app.cell
+def the_class_list(found, loaded, classlist_picker):
+    def class_list_choice(picked, configured):
+        """Which class list to read, and where it came from.
+
+        **Picked wins.** module.toml is the module's memory, but a path in it
+        that is wrong is the whole reason this control exists, so the
+        remembered value cannot be the one that always wins.
+        """
+        if picked is not None:
+            return picked, "picked here"
+        return configured, "from module.toml"
+
+    def read_class_list(path, module):
+        """The class list at `path`, or None and the reason why."""
         if path is None:
-            return None, "No class list set. Add `classlist` to `[paths]`."
+            return None, (
+                "**No class list.** `[paths]` in module.toml has no "
+                "`classlist`, so pick the file above."
+            )
         if not path.exists():
-            return None, f"No class list at `{path}`."
+            return None, (
+                f"**No class list at** `{path}`. Pick the file above — the "
+                "marking steps all wait on this one."
+            )
+
         # Groups have to be asked for at ingest: a group allocation needs the
         # column, and it is dropped when it is not wanted. Only a
         # Brightspace-managed group assessment has one to ask for -- a
@@ -747,15 +789,62 @@ def the_class_list(found, loaded):
             frame = import_brightspace_classlist(path, group=grouped)
         except Exception as exc:
             return None, f"`{path.name}` would not read: `{exc}`"
+
+        # import_brightspace_classlist returns None rather than raising for a
+        # file it cannot make sense of. Reading len(None) here took the whole
+        # page down with a TypeError, which is the one thing a step may not do.
+        if frame is None:
+            return None, (
+                f"`{path.name}` would not read. It should be a Brightspace "
+                "class list export, with `Username`, `Last Name` and "
+                "`First Name` columns."
+            )
+
         return frame, (
-            f"**{len(frame)} students** on the class list"
-            + (" (with groups)" if grouped else "")
+            f"**{len(frame)} students** on the class list (`{path.name}`)"
+            + (" — with groups" if grouped else "")
         )
 
-    class_list, class_list_note = _read(found.module) if loaded else (None, "")
+    def _now():
+        picked = classlist_picker.value
+        path, where = class_list_choice(
+            pl.Path(picked[0].path) if picked else None,
+            found.module.classlist_path,
+        )
+        frame, note = read_class_list(path, found.module)
+        return frame, path, f"{note} *({where})*" if path is not None else note
+
+    class_list, class_list_path, class_list_note = (
+        _now() if loaded else (None, None, "")
+    )
 
     mo.md(class_list_note) if loaded else mo.md("")
-    return (class_list,)
+    return class_list, class_list_choice, class_list_path, read_class_list
+
+
+@app.cell
+def do_remember_classlist(
+    remember_classlist, remember_class_list, class_list_path, loaded, attempt,
+    failed,
+):
+    if not (remember_classlist.value and loaded and class_list_path is not None):
+        remembered = mo.md("")
+    else:
+        _done, _error = attempt(lambda: remember_class_list(class_list_path))
+        if _error is not None:
+            remembered = failed("Remembering the class list", _error)
+        else:
+            remembered = mo.md(
+                f"""
+                ### Remembered
+
+                `classlist = "{_done.as_posix()}"` is now in module.toml.
+                Click **Re-read this folder** at the top to see it.
+                """
+            )
+
+    remembered
+    return
 
 
 @app.cell
@@ -856,6 +945,10 @@ def why_not(chosen, collected, class_list, repeats):
                 f"{len(repeats)} student(s) submitted more than once — "
                 "resolve that first, below"
             ),
+            "group sheets": (
+                "this is a group assessment whose groups you keep yourself, "
+                f"and there are no sheets at `{chosen.group_sheets_path}`"
+            ),
         }
         have = {
             "class list": class_list is not None,
@@ -864,6 +957,13 @@ def why_not(chosen, collected, class_list, repeats):
             "grade cell": bool(chosen.grade_cell),
             "submissions": chosen.submissions_path.is_dir(),
             "one folder each": not repeats,
+            # Only leader-managed groups have sheets to be missing. A
+            # Brightspace-managed one gets its groups from the class list,
+            # which is already a need of its own.
+            "group sheets": (
+                chosen.group_sheets_path is None
+                or chosen.group_sheets_path.is_dir()
+            ),
         }
         return [reasons[need] for need in needs if not have[need]]
 
@@ -890,6 +990,54 @@ def the_steps(found):
     Each takes the assessment it works on. The module handle comes from the
     page, because it is the file every one of these records into.
     """
+
+    def remember_class_list(path):
+        """Record a class list in module.toml, relative to the module folder.
+
+        Nothing absolute goes in the file: these folders live under OneDrive,
+        where the absolute path differs per machine and per account.
+        """
+        root = found.module.root
+        try:
+            relative = pl.Path(path).relative_to(root)
+        except ValueError:
+            raise ValueError(
+                f"{path} is outside the module folder ({root}). module.toml "
+                "stores paths relative to itself, so the class list has to "
+                "live in the module folder. Copy it in and pick it again."
+            )
+        handle = found.file
+        # `save` updates keys already in the file and does not add new ones --
+        # appending to a table moves the comment that follows it. So say
+        # plainly when there is nothing to update, rather than reporting a
+        # save that changed nothing.
+        if "classlist" not in (handle.document.get("paths") or {}):
+            raise ValueError(
+                "module.toml has no `classlist` line under `[paths]` to "
+                "update, and saving will not add one -- appending a key moves "
+                "the comment that follows the table. Add this line by hand "
+                f'under [paths]:\n\n    classlist = "{relative.as_posix()}"'
+            )
+        handle.module.paths.classlist = relative.as_posix()
+        handle.save()
+        return relative
+
+    def collect_groups(assessment, class_list=None):
+        """Collect a leader-managed assessment's own group sheets.
+
+        Allocation does this too. Running it on its own first is where a
+        mistyped id or a student left off every sheet shows up, and both are
+        much cheaper to fix before the graders have workbooks.
+        """
+        membership = build_group_membership(assessment)
+        # The join is where a student in no group is named, so do it here
+        # rather than leaving it to be found at allocation.
+        attached = (
+            attach_group_membership(class_list, membership.frame)
+            if class_list is not None
+            else None
+        )
+        return membership, attached
 
     def allocate_marking(assessment, class_list, replace: bool = False):
         # One call for all three kinds. It picks the allocator, collects a
@@ -986,6 +1134,8 @@ def the_steps(found):
 
     return (
         allocate_marking,
+        collect_groups,
+        remember_class_list,
         collect_marks,
         recorded,
         collect_quizzes,
@@ -993,6 +1143,101 @@ def the_steps(found):
         rename_back,
         resolve_resubmissions,
     )
+
+
+@app.cell
+def groups_panel(chosen, class_list, loaded):
+    # A group assessment's membership has to exist before anything can be
+    # allocated, and where it comes from depends on which kind it is. This is
+    # the only step whose *presence* depends on the assessment: an individual
+    # one has no groups to collect, and showing a dead button for it would
+    # say there is something to do.
+    catch_groups = mo.ui.run_button(label="Collect the groups", kind="warn")
+
+    def _panel():
+        if chosen is None or not chosen.group:
+            return mo.md("")
+
+        if chosen.group_source is GroupSource.BRIGHTSPACE:
+            arrived = class_list is not None and "Group" in class_list.columns
+            return mo.md(
+                "### Groups\n\n"
+                "Brightspace made these groups, so they come down **in the "
+                "class list** and there is nothing to collect. "
+                + (
+                    f"The group column is there: "
+                    f"**{class_list['Group'].nunique()} groups**."
+                    if arrived
+                    else "*The class list has no group column yet* — read one "
+                    "above, exported with Brightspace's group function."
+                )
+            )
+
+        sheets = chosen.group_sheets_path
+        if sheets is None or not sheets.is_dir():
+            return mo.md(
+                f"### Groups\n\n*Not yet — no group sheets folder at "
+                f"`{sheets}`.* Put one sheet per team in there, named for the "
+                "team, or one workbook with a tab per team."
+            )
+
+        found_sheets = sorted(
+            p.name for p in sheets.iterdir()
+            if p.suffix.lower() in (".csv", ".xlsx", ".xlsm")
+            and not p.name.startswith("~$")
+        )
+        return mo.vstack([
+            mo.md(
+                "### Groups\n\n"
+                "You keep these groups yourself, so they have to be collected "
+                f"into one student-to-group table before anything can be "
+                f"allocated. In `{sheets.name}/`: "
+                f"**{len(found_sheets)} sheet(s)** — `{found_sheets}`.\n\n"
+                "Allocating does this too. Running it here first is where a "
+                "mistyped id or a student left off every sheet shows up, and "
+                "both are much cheaper to fix before the graders have "
+                "workbooks."
+            ),
+            catch_groups,
+        ])
+
+    _panel() if loaded else mo.md("")
+    return (catch_groups,)
+
+
+@app.cell
+def do_catch_groups(catch_groups, collect_groups, chosen, class_list, attempt, failed):
+    if not (catch_groups.value and chosen is not None and chosen.group):
+        caught_groups = mo.md("")
+    else:
+        _done, _error = attempt(lambda: collect_groups(chosen, class_list))
+        if _error is not None:
+            caught_groups = failed("Collecting the groups", _error)
+        else:
+            _membership, _attached = _done
+            _sizes = _membership.frame["Group"].value_counts().sort_index()
+            caught_groups = mo.vstack([
+                mo.md(
+                    f"""
+                    ### Groups collected
+
+                    {_membership} — written to
+                    `{_membership.path.name}` in `grading_output/`.
+
+                    {"Every student on the class list is in a group."
+                     if _attached is not None
+                     else "*Read a class list above to check every student "
+                          "is in one.*"}
+                    """
+                ),
+                mo.ui.table(
+                    _sizes.rename("students").reset_index(names="group"),
+                    selection=None,
+                ),
+            ])
+
+    caught_groups
+    return
 
 
 @app.cell
@@ -1005,7 +1250,7 @@ def allocate_button(blocking, step_panel, chosen):
         "at the assessment root, and gives each grader their own workbook in "
         "`grading_output/`. The split is random and even.",
         allocate,
-        blocking("class list", "graders"),
+        blocking("class list", "graders", "group sheets"),
     ) if chosen is not None else mo.md("")
     return (allocate,)
 
