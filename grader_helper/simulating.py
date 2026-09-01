@@ -38,8 +38,14 @@ House convention::
 
 From a terminal::
 
-    uv run python -m grader_helper.simulating ~/scratch/PS4001
-    uv run python -m grader_helper.simulating ~/scratch/PS4001 -a cw1 --write
+    uv run simulate-marking ~/scratch/PS4001
+    uv run simulate-marking ~/scratch/PS4001 -a cw1 --write
+
+or, for files that are not laid out as a module -- a download and the grader
+workbooks sitting in folders of their own::
+
+    uv run simulate-marking -s "PS4001 CW1/Downloads" -c D30 \
+                            -w "PS4001 CW1/Grader sheets" --write
 """
 
 import argparse
@@ -132,8 +138,11 @@ def _identifier(stem: str) -> str | None:
     return found or None
 
 
-def feedback_sheets(assessment: Assessment) -> dict[str, list[pl.Path]]:
-    """Every distributed feedback sheet, by the identifier it is named for.
+def feedback_sheets_in(submissions: pl.Path) -> dict[str, list[pl.Path]]:
+    """Every distributed feedback sheet under a folder, by identifier.
+
+    The folder form. `feedback_sheets` is the same thing for an assessment
+    that knows where its submissions are.
 
     **A list per identifier, not one path.** A student who submitted twice
     has two folders and therefore two feedback sheets, and that is a normal
@@ -148,12 +157,12 @@ def feedback_sheets(assessment: Assessment) -> dict[str, list[pl.Path]]:
         If the submissions folder is not there, which means the download has
         not been unzipped into it yet.
     """
-    submissions = assessment.submissions_path
+    submissions = pl.Path(submissions)
     if not submissions.is_dir():
         raise NotADirectoryError(
-            f"No submissions folder for {assessment.id!r} at {submissions}. "
-            "There is nothing to mark until the Brightspace download is "
-            "unzipped into it and the feedback sheets are distributed."
+            f"{submissions} is not a directory. This should be the unzipped "
+            "folder of submissions, with a feedback sheet in each student's "
+            "or group's folder."
         )
 
     found: dict[str, list[pl.Path]] = {}
@@ -164,6 +173,44 @@ def feedback_sheets(assessment: Assessment) -> dict[str, list[pl.Path]]:
         if identifier is not None:
             found.setdefault(identifier, []).append(path)
     return found
+
+
+def feedback_sheets(assessment: Assessment) -> dict[str, list[pl.Path]]:
+    """Every distributed feedback sheet for an assessment, by identifier."""
+    return feedback_sheets_in(assessment.submissions_path)
+
+
+#: Files `grading_output` holds that are not a grader's workbook. Everything
+#: else in there is named for the grader it belongs to, which is what makes
+#: the folder readable without being told who the graders are.
+NOT_A_GRADER_WORKBOOK = ("completed_grades", "distributed", "group_membership")
+
+
+def grader_workbooks(
+    folder: pl.Path, graders: "Sequence[str] | None" = None
+) -> dict[str, pl.Path]:
+    """The grader workbooks in a folder, by the grader they are named for.
+
+    Given ``graders``, only those, and a missing one is simply absent rather
+    than an error -- a grader who has not been allocated anything yet has no
+    workbook, and that is not this function's business. Given none, every
+    workbook in the folder, which is how a folder can be pointed at without
+    being told who marks it.
+    """
+    folder = pl.Path(folder)
+    if not folder.is_dir():
+        return {}
+
+    if graders is not None:
+        found = {g: folder / f"{g}.xlsx" for g in graders}
+        return {g: path for g, path in found.items() if path.exists()}
+
+    return {
+        path.stem: path
+        for path in sorted(folder.glob("*.xlsx"))
+        if not path.name.startswith("~$")
+        and path.stem.lower() not in NOT_A_GRADER_WORKBOOK
+    }
 
 
 def _already_marked(path: pl.Path, cell: str) -> bool:
@@ -272,6 +319,136 @@ def _key_column(frame: pd.DataFrame) -> str:
     )
 
 
+def simulate_marking_in(
+    submissions: pl.Path,
+    grade_cell: str,
+    *,
+    workbooks: pl.Path | None = None,
+    graders: "Sequence[str] | None" = None,
+    marks_out_of: float = 100,
+    seed: int | None = None,
+    boundaries: int = 3,
+    discrepancies: int = 0,
+    overwrite: bool = False,
+    dry_run: bool = False,
+    marks: Mapping[str, float] | None = None,
+) -> SimulatedMarking:
+    """
+    Mark a folder of submissions as if a grader had, on both records.
+
+    **The folder form.** Nothing here needs a ``module.toml`` or the
+    assessment layout -- point it at an unzipped download and, if you have
+    them, at the folder holding the grader workbooks.
+    :func:`simulate_marking` is the same thing for an assessment that
+    already knows where those two folders are.
+
+    Parameters
+    ----------
+    submissions : pathlib.Path
+        The unzipped download, with a feedback sheet in each student's or
+        group's folder.
+    grade_cell : str
+        The cell in the feedback sheet the mark goes in -- the same cell
+        ``catch_grades`` reads back.
+    workbooks : pathlib.Path, optional
+        The folder holding the grader workbooks. Left out, only the feedback
+        sheets are marked, which is the *first* of the two records and on
+        its own gives reconciliation nothing to compare.
+    graders : sequence of str, optional
+        Whose workbooks to fill. Left out, every workbook in ``workbooks``
+        is taken to be a grader's -- see :func:`grader_workbooks`.
+    marks_out_of : float
+        The scale to draw on. The distribution and the planted boundary
+        marks are both fractions of it.
+    seed, boundaries, discrepancies, overwrite, dry_run, marks
+        As :func:`simulate_marking`.
+
+    Returns
+    -------
+    SimulatedMarking
+        What was written, skipped and planted.
+
+    Examples
+    --------
+    ::
+
+        import pathlib as pl        # pl is pathlib
+
+        simulate_marking_in(
+            pl.Path("~/marking/PS4001/cw1/submissions").expanduser(),
+            "D30",
+            workbooks=pl.Path("~/marking/PS4001/cw1/grading_output").expanduser(),
+            seed=1,
+            discrepancies=2,
+        )
+    """
+    sheets = feedback_sheets_in(submissions)
+    if not sheets:
+        raise ValueError(
+            f"No feedback sheets under {submissions}. They are named "
+            "'Feedback sheet <id>.xlsx' and distribute_feedback_sheets puts "
+            "one in each folder; nothing can be marked until it has run."
+        )
+
+    # One random stream for the whole run. Two Random(seed) objects make the
+    # same first choice, which had the mistyped students coming out exactly
+    # equal to the boundary students on every seed.
+    rng = random.Random(seed)
+    drawn = (
+        dict(marks)
+        if marks is not None
+        else draw_marks(list(sheets), marks_out_of, boundaries=boundaries, rng=rng)
+    )
+
+    if discrepancies > len(drawn):
+        raise ValueError(
+            f"Asked for {discrepancies} discrepancy(ies) but there are only "
+            f"{len(drawn)} mark(s) to spoil."
+        )
+
+    # The mistyped copy: the sheet says one thing, the workbook another.
+    # Done here rather than by nudging the sheet afterwards so that the
+    # *sheet* stays the record the student received, which is what it is.
+    reported = dict(drawn)
+    planted: dict[str, tuple[float, float]] = {}
+    for identifier in rng.sample(sorted(drawn), discrepancies):
+        # A transposition-sized slip, and never off the end of the scale.
+        slip = rng.choice([-10, -9, -2, -1, 1, 2, 9, 10])
+        wrong = min(max(drawn[identifier] + slip, 0.0), marks_out_of)
+        if wrong == drawn[identifier]:
+            wrong = min(drawn[identifier] + 1, marks_out_of)
+        reported[identifier] = wrong
+        planted[identifier] = (drawn[identifier], wrong)
+
+    written: dict[str, list[pl.Path]] = {}
+    skipped: dict[str, list[pl.Path]] = {}
+    for identifier, paths in sheets.items():
+        for path in paths:
+            if not overwrite and _already_marked(path, grade_cell):
+                skipped.setdefault(identifier, []).append(path)
+                continue
+            if not dry_run:
+                _write_sheet(path, grade_cell, drawn[identifier])
+            written.setdefault(identifier, []).append(path)
+
+    filled = (
+        _fill_grader_workbooks(
+            grader_workbooks(workbooks, graders), reported, dry_run=dry_run
+        )
+        if workbooks is not None
+        else {}
+    )
+
+    return SimulatedMarking(
+        marks=drawn,
+        sheets=written,
+        skipped=skipped,
+        workbooks=filled,
+        discrepancies=planted,
+        dry_run=dry_run,
+    )
+
+
 def simulate_marking(
     assessment: Assessment,
     *,
@@ -289,6 +466,10 @@ def simulate_marking(
     the same mark into the ``Mark`` column of the grader workbook that
     student or group belongs to -- which is what a grader does, in that
     order, and what step 7 then reconciles.
+
+    The assessment supplies the two folders, the cell and the scale;
+    :func:`simulate_marking_in` is the same run against folders named
+    directly, for a set of files that is not laid out as a module.
 
     Parameters
     ----------
@@ -340,7 +521,8 @@ def simulate_marking(
         raise ValueError(
             "assessment must be an Assessment, reached through a module "
             "loaded with load_module() -- an unbound one does not know where "
-            "its own files are."
+            "its own files are. Point simulate_marking_in() at the folders "
+            "instead if these files are not laid out as a module."
         )
     if assessment.grade_cell is None:
         raise ValueError(
@@ -349,83 +531,30 @@ def simulate_marking(
             "is the same cell catch_grades reads back."
         )
 
-    sheets = feedback_sheets(assessment)
-    if not sheets:
-        raise ValueError(
-            f"No feedback sheets under {assessment.submissions_path}. "
-            "distribute_feedback_sheets puts them there, named "
-            "'Feedback sheet <id>.xlsx'; nothing can be marked until it has "
-            "run."
-        )
-
-    # One random stream for the whole run. Two Random(seed) objects make the
-    # same first choice, which had the mistyped students coming out exactly
-    # equal to the boundary students on every seed.
-    rng = random.Random(seed)
-    drawn = (
-        dict(marks)
-        if marks is not None
-        else draw_marks(
-            list(sheets), assessment.marks_out_of, boundaries=boundaries, rng=rng
-        )
-    )
-
-    if discrepancies > len(drawn):
-        raise ValueError(
-            f"Asked for {discrepancies} discrepancy(ies) but there are only "
-            f"{len(drawn)} mark(s) to spoil."
-        )
-
-    # The mistyped copy: the sheet says one thing, the workbook another.
-    # Done here rather than by nudging the sheet afterwards so that the
-    # *sheet* stays the record the student received, which is what it is.
-    reported = dict(drawn)
-    planted: dict[str, tuple[float, float]] = {}
-    for identifier in rng.sample(sorted(drawn), discrepancies):
-        # A transposition-sized slip, and never off the end of the scale.
-        slip = rng.choice([-10, -9, -2, -1, 1, 2, 9, 10])
-        wrong = min(max(drawn[identifier] + slip, 0.0), assessment.marks_out_of)
-        if wrong == drawn[identifier]:
-            wrong = min(drawn[identifier] + 1, assessment.marks_out_of)
-        reported[identifier] = wrong
-        planted[identifier] = (drawn[identifier], wrong)
-
-    written: dict[str, list[pl.Path]] = {}
-    skipped: dict[str, list[pl.Path]] = {}
-    for identifier, paths in sheets.items():
-        for path in paths:
-            if not overwrite and _already_marked(path, assessment.grade_cell):
-                skipped.setdefault(identifier, []).append(path)
-                continue
-            if not dry_run:
-                _write_sheet(path, assessment.grade_cell, drawn[identifier])
-            written.setdefault(identifier, []).append(path)
-
-    workbooks = _fill_grader_workbooks(assessment, reported, dry_run=dry_run)
-
-    return SimulatedMarking(
-        marks=drawn,
-        sheets=written,
-        skipped=skipped,
-        workbooks=workbooks,
-        discrepancies=planted,
+    return simulate_marking_in(
+        assessment.submissions_path,
+        assessment.grade_cell,
+        workbooks=assessment.grading_output_path,
+        graders=[g.initials for g in assessment.graders],
+        marks_out_of=assessment.marks_out_of,
+        seed=seed,
+        boundaries=boundaries,
+        discrepancies=discrepancies,
+        overwrite=overwrite,
         dry_run=dry_run,
+        marks=marks,
     )
 
 
 def _fill_grader_workbooks(
-    assessment: Assessment,
+    workbooks: Mapping[str, pl.Path],
     marks: Mapping[str, float],
     *,
     dry_run: bool = False,
 ) -> dict[str, int]:
     """Copy the marks into each grader's workbook, as the grader would."""
     filled: dict[str, int] = {}
-    for grader in (g.initials for g in assessment.graders):
-        path = assessment.grading_output_path / f"{grader}.xlsx"
-        if not path.exists():
-            continue
-
+    for grader, path in workbooks.items():
         frame = pd.read_excel(path, dtype={"Student ID": str})
         key = _key_column(frame)
         keys = frame[key].astype(str)
@@ -472,18 +601,106 @@ def _seed_for(seed: int | None, assessment: Assessment) -> int | None:
     return seed + zlib.crc32(assessment.id.encode("utf-8"))
 
 
+def _run_on_folders(args, parser) -> int:
+    """The folder form: no module.toml, just the paths given."""
+    if args.cell is None:
+        parser.error(
+            "--submissions needs --cell: the cell a mark goes in is the one "
+            "thing about a feedback sheet that cannot be guessed from it, "
+            "and it has to be the same cell catch_grades reads back."
+        )
+
+    graders = (
+        [g.strip() for g in args.graders.split(",") if g.strip()]
+        if args.graders
+        else None
+    )
+    print(f"{args.submissions}  (cell {args.cell})")
+    if args.workbooks is None:
+        print(
+            "  no --workbooks: marking the feedback sheets only, so there is "
+            "one record and nothing to reconcile it against"
+        )
+
+    try:
+        result = simulate_marking_in(
+            args.submissions,
+            args.cell,
+            workbooks=args.workbooks,
+            graders=graders,
+            marks_out_of=args.marks_out_of,
+            seed=args.seed,
+            boundaries=args.boundaries,
+            discrepancies=args.discrepancies,
+            overwrite=args.overwrite,
+            dry_run=not args.write,
+        )
+    except (ValueError, NotADirectoryError) as exc:
+        print(f"  {exc}")
+        return 1
+
+    _report(result)
+    if not args.write:
+        print("\nNothing was written. Pass --write to do it for real.")
+    return 0
+
+
+def _report(result: SimulatedMarking, label: str = "") -> None:
+    """One run, on stdout. The planted discrepancies are listed because
+    they are the point: they are what reconciliation should then find."""
+    print(f"  {label}{result}")
+    for identifier, (sheet, workbook) in sorted(result.discrepancies.items()):
+        print(f"      planted: {identifier} sheet {sheet} vs workbook {workbook}")
+
+
 def main(argv: "Sequence[str] | None" = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="python -m grader_helper.simulating",
+        # No prog=: argparse takes it from argv[0], so the usage line names
+        # however it was actually invoked -- `simulate-marking` for the
+        # console script, the -m form for the module.
         description=(
             "Fill in marks nobody marked, so the rest of the pipeline can be "
             "run. Writes into real files -- point it at a scratch copy."
         ),
     )
-    parser.add_argument("module", type=pl.Path, help="The module folder, or its module.toml.")
+    parser.add_argument(
+        "module", type=pl.Path, nargs="?", default=None,
+        help="A module folder, or its module.toml. Leave it out and use "
+             "--submissions to work on folders that are not laid out as a "
+             "module.",
+    )
     parser.add_argument(
         "-a", "--assessment", default=None,
         help="Which assessment. Default: every one with a grade_cell.",
+    )
+
+    folders = parser.add_argument_group(
+        "pointing at folders",
+        "For a set of files that is not a module -- an unzipped download and, "
+        "if you have them, the grader workbooks beside it.",
+    )
+    folders.add_argument(
+        "-s", "--submissions", type=pl.Path, default=None,
+        help="The unzipped download, with a feedback sheet in each folder.",
+    )
+    folders.add_argument(
+        "-w", "--workbooks", type=pl.Path, default=None,
+        help="The folder of grader workbooks. Without it only the feedback "
+             "sheets are marked, and reconciliation has nothing to compare.",
+    )
+    folders.add_argument(
+        "-c", "--cell", default=None,
+        help="The cell in the feedback sheet the mark goes in, e.g. D30. "
+             "Required with --submissions.",
+    )
+    folders.add_argument(
+        "--graders", default=None,
+        help="Whose workbooks to fill, comma separated (KOM,SOB). Default: "
+             "every workbook in --workbooks.",
+    )
+    folders.add_argument(
+        "--marks-out-of", type=float, default=100,
+        help="The scale to draw marks on. Default 100.",
     )
     parser.add_argument(
         "--write", action="store_true",
@@ -504,6 +721,16 @@ def main(argv: "Sequence[str] | None" = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    if (args.module is None) == (args.submissions is None):
+        parser.error(
+            "Give either a module folder or --submissions, not both and not "
+            "neither. A module knows where its own submissions are; "
+            "--submissions is for files that are not laid out as one."
+        )
+
+    if args.submissions is not None:
+        return _run_on_folders(args, parser)
+
     module = load_module(args.module)
     print(f"{module.code} -- {module.name}  ({module.root})")
 
@@ -521,9 +748,7 @@ def main(argv: "Sequence[str] | None" = None) -> int:
             print(f"  {assessment.id}: skipped -- {exc}")
             continue
 
-        print(f"  {assessment.id}: {result}")
-        for identifier, (sheet, workbook) in sorted(result.discrepancies.items()):
-            print(f"      planted: {identifier} sheet {sheet} vs workbook {workbook}")
+        _report(result, label=f"{assessment.id}: ")
 
     if not args.write:
         print("\nNothing was written. Pass --write to do it for real.")

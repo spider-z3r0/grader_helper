@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 647 tests on Linux and 648 with a real Excel:
+Done, 658 tests on Linux and 659 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -320,8 +320,8 @@ Done, 647 tests on Linux and 648 with a real Excel:
   leader's own group sheets collected, and allocation wired to the
   assessment -- see **Group assessments**
 - `simulate-marking`: fills in marks nobody marked, on both records and
-  with deliberate discrepancies, so everything after marking can be run
-  -- see **Simulating the marking**
+  with deliberate discrepancies, so everything after marking can be run.
+  Takes a module or a pair of folders -- see **Simulating the marking**
 
 ### The rewire onto `Module`
 
@@ -1779,6 +1779,35 @@ uv run simulate-marking ~/scratch/PS4001                 # the plan
 uv run simulate-marking ~/scratch/PS4001 --write         # do it
 uv run simulate-marking ~/scratch/PS4001 -a cw1 -d 2 --write
 ```
+
+**It also takes folders.** A set of files extracted from a past module is a
+download and some grader workbooks sitting where somebody put them; there is
+no `module.toml` to load and no assessment layout to resolve paths against:
+
+```
+uv run simulate-marking -s "PS4001 CW1/Downloads" -c D30 \
+                        -w "PS4001 CW1/Grader sheets" --write
+```
+
+`simulate_marking_in(submissions, grade_cell, ...)` is the folder form and
+does the work; `simulate_marking(assessment, ...)` is a thin wrapper that
+reads the two folders, the cell and the scale off the assessment. Written
+the other way round first, and the folder form had to be extracted out of
+it -- an assessment is one way to know where the files are, not the only
+one.
+
+`--cell` is required with `--submissions`, because the cell a mark goes in
+is the one thing about a feedback sheet that cannot be worked out by
+looking at it, and it has to be the cell `catch_grades` reads back.
+Without `--workbooks` only the feedback sheets are marked, which is one
+record and leaves reconciliation nothing to compare -- so it says so.
+Which graders are involved is read off the folder: everything in it that is
+not `completed_grades`, `distributed` or `group_membership` is somebody's
+workbook.
+
+Nothing else needed this. `import_brightspace_classlist`,
+`collect_group_membership` and `load_graders` already take a path to a file
+and always did.
 
 **It writes both records, not one.** They are two records and step 7 exists
 because they can disagree, so `--discrepancies N` has the grader *mistype* N

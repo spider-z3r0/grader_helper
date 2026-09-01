@@ -71,7 +71,10 @@ from .simulating import (
     SimulatedMarking,
     draw_marks,
     feedback_sheets,
+    feedback_sheets_in,
+    grader_workbooks,
     simulate_marking,
+    simulate_marking_in,
 )
 
 # collating and allocating -- the assembly layer, above the packages they
@@ -176,6 +179,9 @@ __all__ = [
     "prepare_data_for_departmental_template",
     "collate_module_marks",
     "simulate_marking",
+    "simulate_marking_in",
+    "feedback_sheets_in",
+    "grader_workbooks",
     "draw_marks",
     "feedback_sheets",
     "SimulatedMarking",

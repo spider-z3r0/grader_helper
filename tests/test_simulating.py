@@ -374,3 +374,149 @@ def test_an_assessment_nobody_marks_by_hand_is_passed_over(ready_to_mark):
     ready_to_mark.assessment("mcq").grade_cell = None
 
     assert [a.id for a in _assessments_to_mark(ready_to_mark, None)] == ["cw1", "cw2"]
+
+
+# ---------------------------------------------------------------------------
+# Pointing at folders, with no module.toml anywhere
+# ---------------------------------------------------------------------------
+#
+# A folder extracted from a past module is a download and a set of grader
+# workbooks sitting where somebody put them. There is no module.toml to load
+# and no assessment layout to resolve paths against, so the same run has to
+# be reachable from the paths alone.
+
+
+@pytest.fixture
+def loose(tmp_path, ready_to_mark):
+    """The same files, rearranged into folders named by a human."""
+    import shutil
+
+    cw1 = ready_to_mark.assessment("cw1")
+    folder = tmp_path / "PS4001 CW1"
+    folder.mkdir()
+    shutil.copytree(cw1.submissions_path, folder / "Downloads")
+    shutil.copytree(cw1.grading_output_path, folder / "Grader sheets")
+
+    assert not list(folder.rglob("module.toml"))
+    return folder
+
+
+def test_a_download_can_be_marked_from_its_path_alone(loose):
+    from grader_helper.simulating import simulate_marking_in
+
+    result = simulate_marking_in(loose / "Downloads", "D30", seed=1)
+
+    assert result.sheets
+    received = catch_grades(loose / "Downloads", "D30")
+    assert received["grade"].notna().all()
+
+
+def test_without_workbooks_there_is_only_one_record(loose):
+    """Marking the sheets alone is half the job -- reconciliation then has
+    nothing to compare, which is worth being obvious about."""
+    from grader_helper.simulating import simulate_marking_in
+
+    result = simulate_marking_in(loose / "Downloads", "D30", seed=1)
+
+    assert result.workbooks == {}
+
+
+def test_the_graders_are_read_off_the_folder(loose):
+    """Nothing says who marks this, so the workbooks in the folder do."""
+    from grader_helper.simulating import simulate_marking_in
+
+    result = simulate_marking_in(
+        loose / "Downloads", "D30", workbooks=loose / "Grader sheets", seed=1
+    )
+
+    assert set(result.workbooks) == {"KOM", "SOB"}
+
+
+def test_named_graders_narrow_it(loose):
+    from grader_helper.simulating import simulate_marking_in
+
+    result = simulate_marking_in(
+        loose / "Downloads", "D30",
+        workbooks=loose / "Grader sheets", graders=["KOM"], seed=1,
+    )
+
+    assert set(result.workbooks) == {"KOM"}
+
+
+def test_what_the_tool_wrote_is_not_a_graders_workbook(loose):
+    """`grading_output` holds the collated file and the group membership as
+    well, and neither is somebody's marking."""
+    from grader_helper.simulating import grader_workbooks
+
+    books = loose / "Grader sheets"
+    (books / "completed_grades.xlsx").write_bytes(b"")
+    (books / "distributed.xlsx").write_bytes(b"")
+    (books / "~$KOM.xlsx").write_bytes(b"")
+
+    assert set(grader_workbooks(books)) == {"KOM", "SOB"}
+
+
+def test_the_scale_is_given_when_no_module_says_it(loose):
+    from grader_helper.simulating import simulate_marking_in
+
+    result = simulate_marking_in(
+        loose / "Downloads", "D30", marks_out_of=50, seed=1, boundaries=0
+    )
+
+    assert all(0 <= m <= 50 for m in result.marks.values())
+
+
+def test_the_two_records_still_disagree_on_purpose(loose):
+    from grader_helper.simulating import simulate_marking_in
+
+    result = simulate_marking_in(
+        loose / "Downloads", "D30",
+        workbooks=loose / "Grader sheets", seed=1, discrepancies=2,
+    )
+
+    received = catch_grades(loose / "Downloads", "D30")
+    reported = ingest_completed_graderfiles(
+        loose / "Grader sheets", ["KOM", "SOB"], file_type="excel"
+    )
+    both = reconcile_marks(received, reported)
+    caught = both.disagreements[both.disagreements["_merge"] == "both"]
+
+    assert set(caught["Student ID"]) == set(result.discrepancies)
+
+
+def test_the_command_line_takes_folders(loose, capsys):
+    from grader_helper.simulating import main
+
+    assert main([
+        "-s", str(loose / "Downloads"),
+        "-w", str(loose / "Grader sheets"),
+        "-c", "D30", "--seed", "1", "--write",
+    ]) == 0
+
+    assert catch_grades(loose / "Downloads", "D30")["grade"].notna().all()
+
+
+def test_submissions_without_a_cell_is_refused(loose):
+    """The one thing about a feedback sheet that cannot be guessed from it."""
+    from grader_helper.simulating import main
+
+    with pytest.raises(SystemExit):
+        main(["-s", str(loose / "Downloads")])
+
+
+def test_a_module_and_folders_together_is_refused(ready_to_mark, loose):
+    """Two answers to where the submissions are."""
+    from grader_helper.simulating import main
+
+    with pytest.raises(SystemExit):
+        main([
+            str(ready_to_mark.root),
+            "-s", str(loose / "Downloads"), "-c", "D30",
+        ])
+
+
+def test_neither_a_module_nor_folders_is_refused():
+    from grader_helper.simulating import main
+
+    with pytest.raises(SystemExit):
+        main([])
