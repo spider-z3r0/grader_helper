@@ -18,8 +18,6 @@ would ask the grader to type the same mark four times.
 House convention: ``pl`` is pathlib, ``pr`` is polars.
 """
 
-import pathlib as pl
-
 import pandas as pd
 import pytest
 
