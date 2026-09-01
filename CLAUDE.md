@@ -51,7 +51,6 @@ should show the import line.
 | the SI upload file | **The SI upload** |
 | status flags, `record()` | **Keeping status** |
 | quizzes, pass marks, free passes | **Quiz collection** |
-| group work, group marking | **Group work** |
 | the dashboard / app | `docs/dashboard-scope.md` first, then **Pointing at a folder** |
 | what to build next | **Next** |
 | something looks broken | **Known gaps** — it may be known |

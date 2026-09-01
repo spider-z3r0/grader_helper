@@ -13,7 +13,6 @@ with app.setup():
     from grader_helper import (
         KEEP_CHOICES,
         alphabetise_folders,
-        attach_groups,
         build_departmental_sheet,
         build_moderation_pack,
         collate_module_marks,
@@ -27,9 +26,7 @@ with app.setup():
         catch_grades,
         collect_quiz_marks,
         distribute_feedback_sheets,
-        distribute_feedback_sheets_groups,
         import_brightspace_classlist,
-        spread_group_marks,
         ingest_completed_graderfiles,
         reconcile_marks,
         resolve_multiple_subs,
@@ -39,14 +36,8 @@ with app.setup():
         scan_multiple_subs,
     )
     from grader_helper.moderation import BORDERLINE_MODES
-    from grader_helper.file_operations.distribute_feedback_sheets import (
-        group_id_from_folder,
-    )
     from grader_helper.file_operations.scan_multiple_submissions import (
         parse_brightspace_folder,
-    )
-    from grader_helper.ingesting.import_brightspace_classlist import (
-        find_group_column,
     )
     from grader_helper.models import (
         COLLECTED_TYPES,
@@ -360,13 +351,9 @@ def module_details():
     si_file = mo.ui.text(
         label="SI's upload file (optional)", placeholder="PS4034_SI.CSV"
     )
-    groups = mo.ui.text(
-        label="Groups file (only if the class list has no group column)",
-        placeholder="groups.csv",
-    )
     return (
-        classlist, code, departmental, groups, leader, moderator, si_file,
-        template, title, year,
+        classlist, code, departmental, leader, moderator, si_file, template,
+        title, year,
     )
 
 
@@ -411,10 +398,6 @@ def assessment_rows(how_many):
                     placeholder="Feedback sheet.xlsx",
                     label="blank feedback sheet",
                 ),
-                "group": mo.ui.checkbox(
-                    value=default.get("group", False),
-                    label="submitted by groups",
-                ),
                 "collected": mo.ui.checkbox(
                     value="pass_mark" in default,
                     label="collected from Brightspace exports",
@@ -437,7 +420,7 @@ def assessment_rows(how_many):
 @app.cell
 def the_form(
     offer, rows, code, title, year, leader, moderator, classlist, departmental,
-    template, si_file, groups,
+    template, si_file,
 ):
     def _row_view(index, row):
         return mo.vstack(
@@ -449,9 +432,9 @@ def the_form(
                     justify="start",
                 ),
                 mo.hstack([row["graders"], row["rubric"]], justify="start"),
-                mo.hstack([row["group"], row["collected"]], justify="start"),
                 mo.hstack(
-                    [row["pass_mark"], row["free_passes"]], justify="start"
+                    [row["collected"], row["pass_mark"], row["free_passes"]],
+                    justify="start",
                 ),
             ]
         )
@@ -463,7 +446,6 @@ def the_form(
             mo.hstack([leader, moderator], justify="start"),
             mo.hstack([classlist, departmental], justify="start"),
             mo.hstack([template, si_file], justify="start"),
-            mo.hstack([groups], justify="start"),
             mo.md(
                 f"""
                 ### The assessment
@@ -473,12 +455,6 @@ def the_form(
                 is **worth** towards the module total. Where they differ you
                 get a raw column and a weighted one; where they are equal
                 there is one column.
-
-                Tick **submitted by groups** where one piece of work comes
-                from a team: the whole group then goes to one grader, so that
-                nobody marks half a project. Where Brightspace manages the
-                groups its class list export carries them; where you keep the
-                membership yourself, name that spreadsheet above.
 
                 Tick **collected from Brightspace exports** for a run of
                 weekly quizzes, or an MCQ read straight out of Brightspace.
@@ -533,11 +509,6 @@ def the_specs(rows):
             "marks_out_of": row["marks_out_of"],
             "weight": row["weight"],
         }
-        # One piece of work per group, so one grader per group and one mark
-        # to spread across its members.
-        if row["group"]:
-            spec["group"] = True
-
         if row["collected"]:
             spec["pass_mark"] = row["pass_mark"]
             spec["free_passes"] = int(row["free_passes"])
@@ -594,7 +565,7 @@ def the_button(offer):
 @app.cell
 def write_the_module(
     create, found, offer, specs, code, title, year, leader, moderator, classlist,
-    departmental, template, si_file, groups,
+    departmental, template, si_file,
 ):
     def _optional(field) -> str | None:
         return field.value.strip() or None
@@ -605,7 +576,6 @@ def write_the_module(
             "departmental_sheet": _optional(departmental),
             "departmental_template": _optional(template),
             "si_file": _optional(si_file),
-            "groups": _optional(groups),
         }
         handle = init_module(
             found.folder,
@@ -719,68 +689,22 @@ def helpers():
 
 @app.cell
 def the_class_list(found, loaded):
-    def _has_group_column(path) -> bool:
-        """Whether the class list carries groups of its own.
-
-        Asked of the file's headers rather than by catching a failure from
-        the importer, which swallows most errors into a print and a None --
-        so "no group column" and "the file is unreadable" would look alike.
-        """
-        try:
-            headers = (
-                pd.read_csv(path, nrows=0)
-                if path.suffix.lower() == ".csv"
-                else pd.read_excel(path, nrows=0)
-            )
-            find_group_column(headers.columns)
-            return True
-        except Exception:
-            return False
-
     def _read(module):
         path = module.classlist_path
         if path is None:
             return None, "No class list set. Add `classlist` to `[paths]`."
         if not path.exists():
             return None, f"No class list at `{path}`."
-
-        # Groups are only fetched when something on this module is marked by
-        # group. They arrive two ways and the rest of the page cannot tell
-        # which: Brightspace manages them and its export carries a group
-        # column, or the leader keeps the membership themselves.
-        wants_groups = any(a.group for a in module.assessments)
+        # Groups have to be asked for at ingest: a group allocation needs the
+        # column, and it is dropped when it is not wanted.
+        grouped = any(a.group for a in module.assessments)
         try:
-            if not wants_groups:
-                return (
-                    import_brightspace_classlist(path),
-                    f"**{len(import_brightspace_classlist(path))} students** "
-                    "on the class list",
-                )
-            if _has_group_column(path):
-                frame = import_brightspace_classlist(path, group=True)
-                came_from = "the class list's own group column"
-            elif module.groups_path is not None:
-                frame = attach_groups(
-                    import_brightspace_classlist(path), module.groups_path
-                )
-                came_from = f"`{module.groups_path.name}`"
-            else:
-                return None, (
-                    "This module has group work, but the class list has no "
-                    "group column and no groups file is named. Either export "
-                    "the class list using Brightspace's group function, or "
-                    "keep the membership yourself and name it:\n\n"
-                    "```toml\n[paths]\ngroups = \"groups.csv\"\n```"
-                )
+            frame = import_brightspace_classlist(path, group=grouped)
         except Exception as exc:
-            return None, f"The class list would not read: `{exc}`"
-
-        if frame is None:
-            return None, f"`{path.name}` would not read."
-
+            return None, f"`{path.name}` would not read: `{exc}`"
         return frame, (
-            f"**{len(frame)} students** on the class list, in "
-            f"**{frame['Group'].nunique()} groups** — from {came_from}"
+            f"**{len(frame)} students** on the class list"
+            + (" (with groups)" if grouped else "")
         )
 
     class_list, class_list_note = _read(found.module) if loaded else (None, "")
@@ -816,13 +740,7 @@ def the_chosen_assessment(found, loaded, which):
                     f"### {assessment.name} (`{assessment.id}`)",
                     "",
                     f"Marked out of {assessment.marks_out_of}, worth "
-                    f"{assessment.weight}."
-                    + (
-                        " **Submitted by groups**, so a whole group goes to "
-                        "one grader and its mark reaches every member."
-                        if assessment.group
-                        else ""
-                    ),
+                    f"{assessment.weight}.",
                     "",
                     "| | |",
                     "|---|---|",
@@ -893,10 +811,6 @@ def why_not(chosen, collected, class_list, repeats):
                 f"{len(repeats)} student(s) submitted more than once — "
                 "resolve that first, below"
             ),
-            "groups": (
-                "this assessment is marked by group, but the class list has "
-                "no groups on it — see the note at the top"
-            ),
         }
         have = {
             "class list": class_list is not None,
@@ -905,10 +819,6 @@ def why_not(chosen, collected, class_list, repeats):
             "grade cell": bool(chosen.grade_cell),
             "submissions": chosen.submissions_path.is_dir(),
             "one folder each": not repeats,
-            "groups": (
-                not chosen.group
-                or (class_list is not None and "Group" in class_list.columns)
-            ),
         }
         return [reasons[need] for need in needs if not have[need]]
 
@@ -958,30 +868,6 @@ def the_steps(found):
         return master, workbooks, allocation
 
     def distribute_sheets(assessment, class_list):
-        if assessment.group:
-            # A group assignment arrives either as one folder per group or as
-            # one per student, depending on how the leader set it up, so the
-            # shape is read off the folders rather than assumed.
-            #
-            # And the folders are left exactly as Brightspace named them: the
-            # rename exists so graders can find a student by surname, and a
-            # group folder is already named for the thing being marked.
-            by_group = any(
-                group_id_from_folder(folder.name)
-                for folder in assessment.submissions_path.iterdir()
-                if folder.is_dir()
-            )
-            copy_in = (
-                distribute_feedback_sheets_groups
-                if by_group
-                else distribute_feedback_sheets
-            )
-            distribution = copy_in(
-                assessment.submissions_path, assessment.rubric_path
-            )
-            found.file.record(distribution, assessment.id)
-            return distribution, pd.DataFrame()
-
         # Never overwrite: a sheet already in a student's folder may carry a
         # mark, and there is no tick that changes that.
         distribution = distribute_feedback_sheets(
@@ -1008,20 +894,9 @@ def the_steps(found):
         found.file.record(distribution, assessment.id)
         return distribution, log
 
-    def collect_marks(assessment, replace: bool = False, class_list=None):
+    def collect_marks(assessment, replace: bool = False):
         graders = [g.initials for g in assessment.graders]
         received = catch_grades(assessment.submissions_path, assessment.grade_cell)
-
-        # catch_grades names each row for whatever the feedback sheet was
-        # named for, which on a group assignment marked as one piece of work
-        # is the group. The departmental sheet has a row per student, so the
-        # group's mark has to reach every member before anything can be
-        # compared against the graders' own sheets, which are per student.
-        if assessment.group and class_list is not None:
-            enrolled = set(class_list["Student ID"])
-            keyed_by_group = not set(received["Student ID"]) & enrolled
-            if keyed_by_group and not received.empty:
-                received = spread_group_marks(received, class_list)
         reported = ingest_completed_graderfiles(
             assessment.grading_output_path, graders, file_type="excel"
         )
@@ -1035,12 +910,6 @@ def the_steps(found):
         return collation, reconcile_marks(received, reported)
 
     def rename_back(assessment):
-        if assessment.group:
-            raise ValueError(
-                f"{assessment.id!r} is marked by group, and its folders were "
-                "left exactly as Brightspace named them — so there is nothing "
-                "to rename back."
-            )
         log_path = assessment.submissions_path / "folder_rename_log.csv"
         if not log_path.exists():
             raise FileNotFoundError(
@@ -1101,7 +970,7 @@ def allocate_button(blocking, step_panel, chosen):
         "at the assessment root, and gives each grader their own workbook in "
         "`grading_output/`. The split is random and even.",
         allocate,
-        blocking("class list", "graders", "groups"),
+        blocking("class list", "graders"),
     ) if chosen is not None else mo.md("")
     return (allocate,)
 
@@ -1231,11 +1100,10 @@ def distribute_button(blocking, step_panel, chosen):
 
     step_panel(
         "2. Distribute the feedback sheets",
-        "Copies the blank sheet into every folder, named for whoever the "
-        "folder belongs to, then renames the folders from Brightspace's "
-        "format into `SURNAME, NAME(id)` for marking. A sheet already there "
-        "is skipped, never replaced — it may already carry a mark. A group "
-        "assessment's folders are left exactly as Brightspace named them.",
+        "Copies the blank sheet into every student's folder, named for their "
+        "id, then renames the folders from Brightspace's format into "
+        "`SURNAME, NAME(id)` for marking. A sheet already there is skipped, "
+        "never replaced — it may already carry a mark.",
         distribute,
         blocking("class list", "rubric", "submissions", "one folder each"),
     ) if chosen is not None else mo.md("")
@@ -1298,15 +1166,11 @@ def collect_button(blocking, step_panel, chosen):
 
 
 @app.cell
-def do_collect(
-    collect, collect_marks, attempt, failed, chosen, class_list, recorded, replace
-):
+def do_collect(collect, collect_marks, attempt, failed, chosen, recorded, replace):
     if not (collect.value and chosen is not None):
         collected_marks = mo.md("")
     else:
-        _done, _error = attempt(
-            lambda: collect_marks(chosen, replace.value, class_list)
-        )
+        _done, _error = attempt(lambda: collect_marks(chosen, replace.value))
         if _error is not None:
             collected_marks = failed("Collecting the marks", _error)
         else:
@@ -1345,8 +1209,7 @@ def rename_button(blocking, step_panel, chosen):
     step_panel(
         "4. Rename the folders for re-upload",
         "Puts every folder back to the exact name Brightspace gave it, using "
-        "the log written at step 2, so the marked folders can go back up. "
-        "Not needed for a group assessment — its folders were never renamed.",
+        "the log written at step 2, so the marked folders can go back up.",
         rename,
         blocking("submissions"),
     ) if chosen is not None else mo.md("")

@@ -37,10 +37,6 @@ class ModulePaths(BaseModel):
 
     assessments: str = "assessments"
     classlist: str | None = None
-    #: Who is in which group, for a module whose group work Brightspace does
-    #: not manage. Only needed when the class list has no group column of its
-    #: own -- see `attach_groups`.
-    groups: str | None = None
     departmental_sheet: str | None = None
     #: The department's blank workbook, which `build_departmental_sheet` lays
     #: out for this module's assessments. It is the department's file and it
@@ -235,10 +231,6 @@ class Module(BaseModel):
     @property
     def departmental_sheet_path(self) -> pl.Path | None:
         return self._resolve(self.paths.departmental_sheet)
-
-    @property
-    def groups_path(self) -> pl.Path | None:
-        return self._resolve(self.paths.groups)
 
     @property
     def departmental_template_path(self) -> pl.Path | None:

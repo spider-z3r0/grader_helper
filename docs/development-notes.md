@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 563 tests on Linux and 564 with a real Excel:
+Done, 542 tests on Linux and 543 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -316,9 +316,6 @@ Done, 563 tests on Linux and 564 with a real Excel:
   upload. See **Running an assessment from the app**
 - `reconcile_marks` and `resolve_multiple_subs`: two steps that existed only
   as notebook code, one of which was subtly wrong
-- **Group assessment** runs end to end: the membership from either source,
-  one grader per group, and the group's mark spread to every member. See
-  **Group work**
 
 ### The rewire onto `Module`
 
@@ -573,62 +570,6 @@ Not done: the scratch copy. Every step writes straight into the module
 folder, which was a deliberate choice for a rehearsal on last year's data
 (see `docs/dashboard-scope.md`) and is still the thing to design before
 anyone else runs this.
-
-### Group work
-
-Most of the pieces were already here and none of them were reachable. The
-model had `Assessment.group`, `assign_graders_groups` allocated a whole team
-to one grader, `distribute_feedback_sheets_groups` copied a sheet per group,
-and `import_brightspace_classlist(group=True)` read Brightspace's own group
-column. What was missing was everything joining them up.
-
-**The setup form could not set the flag**, so no module created in the app
-was ever a group module and the branch had never run.
-
-**Groups only came from Brightspace.** A leader whose module Brightspace does
-not manage keeps the membership in their own spreadsheet, and nothing read
-one. `load_group_membership` and `attach_groups` do, and end in exactly the
-shape the Brightspace route ends in -- same `Group` column, same refusal of a
-student with no group, same `SOLO` expansion -- so nothing downstream can
-tell which way a module's groups arrived. `paths.groups` names the file.
-
-**Nothing turned one mark into a row per student.** Where a group hands in
-one piece of work there is one feedback sheet, so the marks come back keyed
-by the group, and the departmental sheet has a row per student.
-`spread_group_marks` is the join, and it refuses a mark for a group nobody is
-in rather than dropping it, because that is somebody's work going missing.
-
-**The two ends spell a group differently, by construction.** `catch_grades`
-takes a mark's key from the *last space-separated token of the feedback
-sheet's filename*, so a sheet distributed into `Group 3`'s folder is
-`Feedback sheet Group 3.xlsx` and its mark arrives keyed `3`, while the class
-list says whatever the leader typed. `group_key` reduces a numbered group to
-its number -- so `Group 3`, `Team 03` and `3` are one group -- and compares
-anything else case- and space-insensitively. It refuses a module carrying
-both `Group 3` and `Team 3`, which cannot be told apart once a sheet is named
-for one of them and would hand that mark to both.
-
-**Two download shapes, read off the folders rather than assumed.** How a
-group assignment arrives depends on how the leader set it up: one folder per
-group, or one per student submitting individually. The distribute step looks
-at the folder names and picks `distribute_feedback_sheets_groups` or the
-individual one accordingly.
-
-**A group assessment's folders are never renamed.** The alphabetise step
-exists so a grader can find a student by surname; a group folder is already
-named for the thing being marked, and the folders go back to Brightspace as
-they came. It is suppressed deliberately rather than incidentally -- with one
-folder per student the rename would work perfectly well, which is exactly why
-the suppression needs a test of its own.
-
-The whole path is driven end to end in `tests/test_dashboard_steps.py`
-against a module built for it: a class list with no group column, a
-membership the leader keeps, and Brightspace's group-format folders. Verified
-by reintroducing six bugs -- an inner join that made a groupless student
-vanish instead of being named, marks for an unknown group dropped quietly,
-solo students left as one team sharing a grader, group labels compared
-literally, two groups allowed to collapse onto one key, a group allocated
-student by student, and the folders alphabetised anyway.
 
 ### Next
 
