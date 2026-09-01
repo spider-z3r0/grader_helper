@@ -284,7 +284,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 693 tests on Linux and 694 with a real Excel:
+Done, 700 tests on Linux and 701 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -880,9 +880,9 @@ A leader's own file routinely carries several columns that all look like the
 group, and an id column named however they type it:
 
 ```
-Name          Student Id   Team   Grp Code   Group
-LAST FIRST    12345678     1      2A         2A_1
-LAST4 FIRST4  12345681     1      2B         2B_1
+Name          Student Id   Team   Cohort   Group
+LAST FIRST    12345678     1      2A       2A_1
+LAST4 FIRST4  12345681     1      2B       2B_1
 ```
 
 `Student Id` is a non-issue — `_normalise_column` ignores case, spaces and
@@ -910,7 +910,7 @@ than either of them, which is the whole test: `groupby(a).ngroups ==
 groupby([a, b]).ngroups == groupby(b).ngroups`.
 
 `group_column` accepts **a list**, composed into one key with
-`GROUP_KEY_SEPARATOR` (`_`): `["Grp Code", "Team"]` over `2A` and `1` gives
+`GROUP_KEY_SEPARATOR` (`_`): `["Cohort", "Team"]` over `2A` and `1` gives
 `2A_1`. That is the sheet with no combined column at all, where `Team` alone
 merges team 1 of 2A with team 1 of 2B. The separator matches what a leader
 writes in their own combined column, which is where the convention comes
@@ -925,6 +925,28 @@ already sitting in `attach_group_membership`, where it was **not** caught —
 every student without a group was being allocated together as a team called
 `nan`, one grader, one mark, no error anywhere. Found by writing the
 composed-key test, which is the argument for writing them.
+
+##### A group code is never the group
+
+One column on that sheet is **not** a candidate and must not be composed
+into the key either. A group code is produced elsewhere, for something else,
+and looks like the group only because the group label is built out of it --
+`2A_1` contains `2A`. Allocating on it puts students who are not in a team
+together in front of one grader, under team names that read perfectly.
+
+It was never *found* automatically -- it is not in `GROUP_COLUMN_ALIASES`
+and never was. What did the damage was the code **recommending** it: the
+ambiguity message named `["Grp Code", "Team"]` as the worked example of a
+composed key, and so did the `module.toml` comment, two docstrings and
+`CLAUDE.md`. A suggestion is not neutral when the reader is looking for
+something to type.
+
+`NEVER_A_GROUP` now refuses it by name, alone or as part of a composed key,
+and the suggestions are a neutral placeholder plus the sheet's actual
+columns. The refusal is a **name** rule, which is the opposite of the
+principle above -- and deliberately so: "which of these columns is the
+group" is a question about the data, but "this column is not a group at all"
+is a fact about the department, of the same kind as `SOLO_ALIASES`.
 
 `Assessment.group_column` records the answer in `module.toml`, so a leader
 whose sheets always look like this answers once and never again. One helper,

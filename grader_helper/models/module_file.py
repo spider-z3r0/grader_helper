@@ -563,12 +563,13 @@ _ASSESSMENT_PREAMBLE = """
 # by one person.
 #
 # Where a sheet has more than one column that could be the group -- a Team,
-# a Grp Code and a combined Group, say -- and they disagree about who is in
+# a cohort code and a combined Group, say -- and they disagree about who is in
 # a team with whom, loading refuses rather than guessing. Answer it once:
 #
 #   group_column = "Group"                 one column holds the whole key
-#   group_column = ["Grp Code", "Team"]    composed, joined with "_", so 2A
-#                                          and 1 become "2A_1"
+#   group_column = ["Cohort", "Team"]      composed, joined with "_", so 2A
+#                                          and 1 become "2A_1", for team
+#                                          numbers that restart per cohort
 #
 # The weights must sum to 100. That is checked every time the file loads,
 # because weights that do not sum to 100 make every student's total wrong and

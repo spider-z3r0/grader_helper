@@ -456,18 +456,18 @@ def test_the_assessment_can_answer_which_column(tmp_path, classlist):
 
 
 def test_a_composed_group_column_is_read_off_the_assessment(tmp_path, classlist):
-    """No combined column in the sheet at all -- 'Grp Code' and 'Team' are
-    only a group together, and team 1 of 2A is not team 1 of 2B."""
+    """No combined column in the sheet at all -- the cohort and the team
+    are only a group together, and team 1 of 2A is not team 1 of 2B."""
     a = make_module(
         tmp_path, group=True, group_source="module_leader",
-        group_column=["Grp Code", "Team"],
+        group_column=["Cohort", "Team"],
     ).assessment("cw1")
     _ml_sheet(
         a.group_sheets_path,
         **{
             "Student Id": [f"2330430{i}" for i in range(6)],
             "Team": [1, 1, 2, 2, 1, 1],
-            "Grp Code": ["2A"] * 4 + ["2B"] * 2,
+            "Cohort": ["2A"] * 4 + ["2B"] * 2,
         },
     )
 

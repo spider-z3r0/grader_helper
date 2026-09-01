@@ -30,6 +30,21 @@ GROUP_COLUMN_ALIASES = (
 )
 
 
+#: Columns that look like a group and are not one, compared the same way as
+#: the aliases above. A group code is produced elsewhere, for something else,
+#: and happens to appear inside the group label -- ``2A_1`` contains ``2A``.
+#: That resemblance is the whole danger: composing a key out of it produces
+#: plausible team names that are not the teams, and nothing downstream can
+#: tell. None of these was ever *found* automatically -- they are not
+#: aliases -- so this is here to refuse one that is asked for by name.
+NEVER_A_GROUP = (
+    "grpcode",
+    "grpcodes",
+    "groupcode",
+    "groupcodes",
+)
+
+
 #: Values in the group column meaning "this student is working alone".
 #: Matched case-insensitively. Each such student becomes their own group --
 #: see _expand_solo_groups for why that matters.
@@ -116,6 +131,16 @@ def _expand_solo_groups(df: pd.DataFrame) -> pd.DataFrame:
 
 def _named(columns, group_column: str) -> str:
     """One explicitly named column, matched leniently."""
+    if _normalise_column(group_column) in NEVER_A_GROUP:
+        raise ValueError(
+            f"{group_column!r} is not the group. A group code is produced "
+            "elsewhere, for something else, and only looks like the group "
+            "because the group label is built out of it -- '2A_1' contains "
+            "'2A'. Marking allocated on it would put students who are not in "
+            "a team together in front of one grader, with team names that "
+            "read perfectly. Use the column that names the team."
+        )
+
     lookup = {_normalise_column(c): c for c in columns}
     found = lookup.get(_normalise_column(group_column))
     if found is not None:
@@ -129,7 +154,11 @@ def _named(columns, group_column: str) -> str:
 def _candidates(columns) -> list[str]:
     """Every column that could be the group, in alias order."""
     lookup = {_normalise_column(c): c for c in columns}
-    return [lookup[alias] for alias in GROUP_COLUMN_ALIASES if alias in lookup]
+    return [
+        lookup[alias]
+        for alias in GROUP_COLUMN_ALIASES
+        if alias in lookup and alias not in NEVER_A_GROUP
+    ]
 
 
 def find_group_column(columns, group_column: str | None = None) -> str:
@@ -184,9 +213,9 @@ def resolve_group_column(
     module leader's own group sheet routinely carries several columns that
     all look like the group:
 
-        Name   Student Id   Team   Grp Code   Group
-        ...    12345678     1      2A         2A_1
-        ...    12345681     1      2B         2B_1
+        Name   Student Id   Team   Cohort   Group
+        ...    12345678     1      2A       2A_1
+        ...    12345681     1      2B       2B_1
 
     ``Team`` and ``Group`` are both recognised, and **they are not the same
     partition**: on ``Team`` those two students are one team, on ``Group``
@@ -204,8 +233,8 @@ def resolve_group_column(
     group_column
         An explicit answer: one column name, or **several**, composed into
         one key with :data:`GROUP_KEY_SEPARATOR` -- which is how a sheet
-        with ``Grp Code`` and ``Team`` but no combined column says
-        ``2A`` + ``1`` is ``2A_1``.
+        whose team numbers restart per cohort says that cohort ``2A``
+        team ``1`` is ``2A_1``.
 
     Returns
     -------
@@ -259,12 +288,12 @@ def resolve_group_column(
         "looks wrong. Say which you mean:\n"
         f"  group_column={finest!r}\n"
         "        one column already holds the whole key\n"
-        '  group_column=["Grp Code", "Team"]\n'
+        '  group_column=["<column>", "<column>"]\n'
         "        several columns composed into one, joined with "
         f"{GROUP_KEY_SEPARATOR!r}, so 2A and 1\n"
-        f"        become {'2A' + GROUP_KEY_SEPARATOR + '1'!r}. Any columns "
-        "will do, not only the ones listed\n"
-        f"        above.\n\n"
+        f"        become {'2A' + GROUP_KEY_SEPARATOR + '1'!r} -- for team "
+        "numbers that restart per cohort. Any\n"
+        "        columns will do, not only the ones listed above.\n\n"
         f"Columns here: {list(frame.columns)}\n"
         "For an assessment, set `group_column` in module.toml and it is "
         "answered once."
@@ -274,9 +303,9 @@ def resolve_group_column(
 def group_key(frame: pd.DataFrame, columns: "str | Sequence[str]") -> pd.Series:
     """One group label per row, from one column or several composed.
 
-    ``["Grp Code", "Team"]`` over ``2A`` and ``1`` gives ``2A_1`` -- the
-    label the leader would have written by hand, and the one their own
-    combined column usually holds.
+    ``["Cohort", "Team"]`` over ``2A`` and ``1`` gives ``2A_1`` -- the label
+    the leader would have written by hand, and the one their own combined
+    column usually holds.
     """
     if isinstance(columns, str):
         columns = [columns]

@@ -170,7 +170,7 @@ class Assessment(BaseModel):
         default=None,
         description="Which column holds the group, where more than one could "
         "and they disagree. A list composes one key from several columns: "
-        "['Grp Code', 'Team'] over 2A and 1 gives '2A_1'. Left unset the "
+        "['Cohort', 'Team'] over 2A and 1 gives '2A_1'. Left unset the "
         "column is found automatically, and an ambiguity is refused rather "
         "than guessed at.",
     )

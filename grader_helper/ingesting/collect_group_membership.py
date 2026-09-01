@@ -220,9 +220,10 @@ def collect_group_membership(
     group_column : str or sequence of str, optional
         The column holding the group, for sheets that carry one. Given
         explicitly, every sheet must have it. A sequence composes one key
-        from several columns -- ``["Grp Code", "Team"]`` over ``2A`` and
-        ``1`` gives ``2A_1`` -- which is what a sheet that never wrote the
-        combined column needs.
+        from several columns -- ``["Cohort", "Team"]`` over ``2A`` and
+        ``1`` gives ``2A_1`` -- which is what a sheet whose team numbers
+        restart per cohort needs. A column that is not a group is refused;
+        see ``NEVER_A_GROUP``.
 
     Returns
     -------

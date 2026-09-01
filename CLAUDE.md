@@ -100,10 +100,12 @@ where a session about it starts.
   `set_paths` do.** Appending puts a key after the table's trailing comment,
   which tomlkit then binds to the wrong table. `add_key` inserts above it.
 - **Which column is the group is decided by the data, not the name.** A
-  leader's sheet often has `Team`, `Grp Code` and `Group` all at once, and
+  leader's sheet often has `Team`, a cohort code and `Group` all at once,
+  and
   they are different partitions. `resolve_group_column` refuses when
   candidates disagree; `group_column` in `module.toml` answers it once, and
-  takes a list to compose a key (`["Grp Code", "Team"]` → `2A_1`).
+  takes a list to compose a key (`["Cohort", "Team"]` → `2A_1`). A group
+  code is **never** the group: see `NEVER_A_GROUP`.
 - `notebooks/grading_walkthrough.py` is deliberately plain and explicit, with
   each assessment written out in full. Do not "improve" it into a selector;
   that is scheduled, and not yet.
