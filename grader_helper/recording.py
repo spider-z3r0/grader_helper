@@ -34,6 +34,7 @@ House convention: ``pl`` is pathlib, ``pr`` is polars.
 
 from typing import Callable, NamedTuple
 
+from .allocating import GraderAllocation
 from .file_operations.distribute_feedback_sheets import Distribution
 from .file_operations.save_distributed_graders import Allocation
 from .file_operations.write_departmental_sheet import DepartmentalWrite
@@ -61,6 +62,14 @@ RULES: dict[type, Evidence] = {
     Allocation: Evidence(
         flag="graders_allocated",
         satisfied=lambda r: r.students > 0,
+        scope="assessment",
+    ),
+    # allocate_graders returns the same evidence one layer up: it wrote the
+    # grader workbooks as well as distributed.xlsx, but the allocation file is
+    # still what says the step happened.
+    GraderAllocation: Evidence(
+        flag="graders_allocated",
+        satisfied=lambda r: r.allocation.students > 0,
         scope="assessment",
     ),
     # Likewise completed_grades: the record the department receives.

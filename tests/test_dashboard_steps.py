@@ -100,6 +100,81 @@ def mark_the_sheets(assessment, graders):
         allocated.to_excel(grader_file, index=False)
 
 
+@pytest.fixture
+def leader_managed_module(module_on_disk):
+    """The same module, with cw1 turned into a leader-managed group piece.
+
+    Edited as text rather than through `ModuleFile.save`, which only updates
+    keys already in the file -- adding a key to an existing `[[assessment]]`
+    is a hand edit, and this is what the hand edit looks like.
+    """
+    import pandas as pd
+
+    toml = module_on_disk / "module.toml"
+    text = toml.read_text(encoding="utf-8")
+    text = text.replace(
+        'id = "cw1"\ntype = "coursework"',
+        'id = "cw1"\ntype = "coursework"\ngroup = true\n'
+        'group_source = "module_leader"',
+        1,
+    )
+    toml.write_text(text, encoding="utf-8")
+
+    # The leader's own sheets, which is the only place these groups exist.
+    ids = pd.read_excel(module_on_disk / "classlist.xlsx", dtype=str)
+    ids = [str(i).replace("#", "") for i in ids["Username"]]
+    sheets = module_on_disk / "assessments" / "cw1" / "groups"
+    sheets.mkdir(parents=True, exist_ok=True)
+    half = len(ids) // 2
+    pd.DataFrame({"Student ID": ids[:half]}).to_excel(
+        sheets / "Team 1.xlsx", index=False
+    )
+    pd.DataFrame({"Student ID": ids[half:]}).to_excel(
+        sheets / "Team 2.xlsx", index=False
+    )
+    return module_on_disk
+
+
+def test_a_leader_managed_group_module_still_reads_its_class_list(
+    leader_managed_module, dashboard
+):
+    """Brightspace never knew about these groups, so the class list has no
+    group column -- and asking for one would refuse a file that is correct."""
+    names = dashboard(leader_managed_module)
+
+    class_list = names["class_list"]
+    assert class_list is not None, "the class list must still read"
+    assert "Group" not in class_list.columns
+
+
+def test_a_leader_managed_group_assessment_allocates_from_the_buttons(
+    leader_managed_module, dashboard
+):
+    """The whole point of the wiring: the groups are collected, whole teams
+    go to one marker, and every student still gets a row to be marked on."""
+    names = dashboard(leader_managed_module)
+    cw1 = names["found"].module.assessment("cw1")
+    graders = [g.initials for g in cw1.graders]
+
+    master, workbooks, allocation = names["allocate_marking"](
+        cw1, names["class_list"]
+    )
+
+    assert cw1.group_membership_path.exists()
+    assert (allocation.groupby("Group")["grader"].nunique() == 1).all()
+
+    written = pd.concat(
+        pd.read_excel(path, dtype={"Student ID": str})
+        for path in workbooks.values()
+    )
+    assert len(written) == master.students
+    assert "Student ID" in written.columns
+
+    assert ModuleFile.load(leader_managed_module).module.assessment(
+        "cw1"
+    ).status.graders_allocated, "the flag has to survive a reload of the file"
+
+
 def test_a_coursework_runs_from_the_buttons(module_on_disk, dashboard):
     """Allocate, distribute, mark, collect, reconcile, rename back."""
     names = dashboard(module_on_disk)

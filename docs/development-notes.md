@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 542 tests on Linux and 543 with a real Excel:
+Done, 611 tests on Linux and 612 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -316,6 +316,9 @@ Done, 542 tests on Linux and 543 with a real Excel:
   upload. See **Running an assessment from the app**
 - `reconcile_marks` and `resolve_multiple_subs`: two steps that existed only
   as notebook code, one of which was subtly wrong
+- Group assessments: the two kinds distinguished in `module.toml`, the
+  leader's own group sheets collected, and allocation wired to the
+  assessment -- see **Group assessments**
 
 ### The rewire onto `Module`
 
@@ -605,6 +608,24 @@ assumes the one before it works.
    for Kev first and hardened for a colleague second — and multi-module
    discovery has since been answered: one folder at a time, chosen in the
    browser, no stored list. See **Pointing at a folder**.
+7. **Marks back off a Brightspace-managed group assessment** — the one
+   place a group assessment is not yet joined up end to end, and independent
+   of 6. Allocation, distribution and marking all work; what is missing is
+   the fan-out on the way back. A grader's workbook for that kind is one row
+   per group, so `ingest_completed_graderfiles` gives `Group` + `Mark`, and
+   `collate_module_marks` wants `Student ID` + `Mark`. Two joins to make:
+
+   - `_from_collated` expanding a group-keyed collated file onto the class
+     list's group column;
+   - `catch_grades` reading `Feedback sheet Team 3.xlsx`, where
+     `extract_studentid_grade` takes the last space-separated token of the
+     stem and so returns `"3"`. Everything after `"Feedback sheet "` is the
+     right rule for both kinds, but changing the existing one is a behaviour
+     change to a covered function — a `key=` argument is the smaller move.
+
+   A **leader-managed** group assessment needs none of this: its download,
+   its feedback sheets and its collation are the ordinary individual path,
+   which is exactly why the two kinds are separated at the model.
 
 **Polars migration** is unblocked but not scheduled: the Excel round-trip
 tests are the contract a port has to keep, and it can land whenever it stops
@@ -799,6 +820,156 @@ The fold is polars throughout; the return is pandas, because that is what
 the rest of the pipeline reads. The conversion goes through Python lists
 rather than `to_pandas()`, which would pull in pyarrow for a frame of a few
 hundred rows.
+
+### Group assessments
+
+There are **two kinds**, and they are not variations on one another. The
+whole design follows from that.
+
+| | groups made in | membership arrives | Brightspace download | the mark belongs to |
+|---|---|---|---|---|
+| `group_source = "brightspace"` | Brightspace | a column in the class list | **one folder per group**, one feedback sheet | the **team** |
+| `group_source = "module_leader"` | the leader's own sheets | nowhere — it has to be collected | one folder per **student**, one feedback sheet each | the **student** |
+
+So the key decides two separate things: where membership is read from, and
+whether a mark is a team's or a person's. `group = true` on its own answers
+neither, which is why an assessment that sets it and nothing else now
+**refuses to load**. There is no default, and picking one would fail late
+and quietly in both directions — a Brightspace-managed run against a
+per-student download simply finds no group folders and distributes nothing,
+and a leader-managed run against a class list that already has the groups
+goes looking for sheets nobody wrote.
+
+Nothing read `Assessment.group` before this, so requiring the second key
+broke no working file.
+
+#### Collecting the leader's own groups
+
+`collect_group_membership` is a fold, the same shape as `collect_quiz_marks`:
+many sheets in, one two-column frame out.
+
+```
+assessments/cw2/groups/
+    Team 1.xlsx        a sheet of student ids
+    Team 2.xlsx                                  ->  Student ID | Group
+    Team 3.xlsx
+```
+
+One workbook with a tab per team works too. **The group name comes from the
+sheet, not from a column** — a file called `Team 1.xlsx` is Team 1, a tab
+called `Team 1` is Team 1 — unless the sheet carries a group column, which
+wins, because a leader who wrote one meant it and it is the only way to put
+two teams in one tab. A single-sheet workbook is named by its *file*: a
+workbook saved from a template is called `Sheet1` inside however carefully
+the file was named.
+
+These are hand-made files, so the reader survives what hand-made files have:
+trailing blank rows, blank lines between teams, a leading `#` on ids pasted
+from a Brightspace export, `~$Team 1.xlsx` lock files from a workbook someone
+left open, an id column called almost anything.
+
+Two refusals, both data problems for the leader:
+
+- **A student in two groups** raises `ConflictingGroupsError`, naming them
+  and both groups. Taking the last one seen marks their work with a team
+  they were not in.
+- **A student in no group** raises `MissingGroupError` — the same rule, and
+  the same `SOLO` escape hatch, as a Brightspace group class list, because
+  `attach_group_membership` reuses that code rather than restating it.
+
+The other half of a mistyped id is a *warning*: the sheets name somebody who
+is not enrolled. A typo shows up twice, once at each end, and seeing both
+together is what identifies it.
+
+`attach_group_membership` is the join that matters: afterwards there is **one
+shape**, a class list with a `Group` column in the position
+`import_brightspace_classlist(group=True)` puts it. Everything downstream
+then stops caring which kind of group assessment it is.
+
+`group_membership.csv` is written to `grading_output/` and **regenerated
+every time**. The sheets are the record; correcting the collected file
+instead would be corrected right back.
+
+#### Allocation, wired in
+
+`allocate_graders` in `allocating.py` is the step that was missing. The
+pieces existed — `assign_graders_individual`, `assign_graders_groups`,
+`save_distributed_graders`, `save_grader_sheets` — but nothing joined them
+to an `Assessment`, so every caller had to know which allocator its
+assessment wanted, where the two files go and what shape a grader's workbook
+should be. Hand it an assessment and a class list and it does the right
+thing for the kind:
+
+| kind | allocated over | grader's workbook |
+|---|---|---|
+| individual | students | one row per student |
+| group, Brightspace | groups | one row per **group** |
+| group, module leader | groups | one row per **student** |
+
+The middle row is the point. Brightspace gives a team one folder, one
+feedback sheet and one mark, so a per-student workbook there would ask the
+grader to type the same mark four times — three extra chances to mistype it,
+in a package whose main control exists because a human copies a number by
+hand. The bottom row is the mirror image: Brightspace knows nothing about
+those groups, so every student has their own sheet and marks may
+legitimately differ within a team. **The group decides who marks it, not
+what the mark is.**
+
+`distributed.xlsx` is one row per student in all three cases. It is the file
+you open when a student asks who marked their work, and that question has an
+answer whoever submitted it.
+
+It lives at the top level beside `collating.py` for the reason given there:
+it is an assembly layer, reaching into `ingesting`, `assignment` and
+`file_operations` at once, and those packages deliberately do not reach
+sideways into each other.
+
+**It writes no status of its own.** `GraderAllocation` carries the
+`Allocation` that `save_distributed_graders` returned rather than a bare
+path, so `ModuleFile.record` reads the same evidence off either and
+`graders_allocated` is set from what the run produced, not from its having
+failed to raise. There is one more line in `recording.RULES` and nothing
+else — see **Keeping status**.
+
+#### In the app
+
+The dashboard's `allocate_marking` was the hand-rolled version of all this,
+and it had exactly the defect the split exists to prevent: it chose the
+allocator off `assessment.group` and then wrote a per-**student** workbook
+whichever it chose, so a Brightspace-managed team would have arrived at its
+grader as four rows wanting the same mark typed four times. It now calls
+`allocate_graders` and keeps its `record` call.
+
+Two more things had to move with it. The class list is imported with
+`group=True` only when some assessment is **Brightspace**-managed: asking
+for a group column on a leader-managed module refuses a class list that is
+perfectly correct, because those groups were never in Brightspace. And the
+setup form now has a **submitted by** dropdown — one control with three
+choices, not a tick plus a follow-up question, so the form cannot produce
+the one state `module.toml` refuses.
+
+Converting an assessment that already exists is still a hand edit:
+`ModuleFile.save` only updates keys already in the file, so `group` and
+`group_source` have to be typed into the `[[assessment]]` block. That is the
+file's own rule, not a gap — it is what stops a save rearranging a
+hand-written file — and `leader_managed_module` in `tests/test_dashboard_steps.py`
+is what the edit looks like.
+
+#### What was verified by reintroducing it
+
+Every guard here was seen to fail before it was trusted: a per-student
+Brightspace workbook, a per-group leader-managed one, groups allocated per
+student so teams split across graders, conflicting groups resolved by
+last-seen, the `Group` column appended rather than placed, the blank-row
+filter removed, `group_source` left out of `module.toml`, `groups/` created
+for every assessment, the form writing `group = true` with no source, and
+the class list asked for groups a leader-managed module has not got.
+
+The last of those is the one worth recording: it **passed** the first time
+the mutation was run, because nothing yet drove the dashboard against a
+leader-managed module. The two tests in `test_dashboard_steps.py` that run
+one end to end were written because of that, and the mutation fails against
+them now. A guard nobody has watched fail is not yet a guard.
 
 ### Collating a module
 
@@ -1111,6 +1282,7 @@ the same failure as a total missing a component. So the flag comes from the
 | result | flag | evidence |
 |---|---|---|
 | `Allocation` | `graders_allocated` | `distributed.xlsx` holds students |
+| `GraderAllocation` | `graders_allocated` | the `Allocation` it carries |
 | `Distribution` | `sheets_distributed` | something copied or skipped, and nothing unmatched |
 | `Collation` | `grades_collected` | `completed_grades` holds students |
 | `DepartmentalWrite` | `departmental_sheet_written` | rows written |
@@ -1123,6 +1295,12 @@ the same failure as a total missing a component. So the flag comes from the
 pack was drawn. Existence alone is not enough, though -- an empty
 `distributed.xlsx` is not an allocation -- so each rule also asks how many
 students are in it.
+
+`GraderAllocation` is the shape of an added rule: `allocate_graders` wrote
+the grader workbooks as well, but the allocation file is still what says the
+step happened, so it holds the `Allocation` rather than a bare path and its
+rule reads straight through to it. One line in `RULES` and nothing else,
+which is what that registry is for.
 
 `ModuleFile.record(result, assessment_id=None)` looks the rule up and sets the
 flag only if the evidence supports it. A result that falls short leaves the
@@ -1587,6 +1765,15 @@ Two things the walkthrough surfaced, neither a bug:
   by anything either; `build_moderation_pack` writes the manifest but does
   not mark the assessment moderated, because a pack having been *built* is
   not the same as it having been *read*.
+- **A Brightspace-managed group assessment cannot reach the grade sheet
+  yet.** Its marks come back keyed by group and nothing expands them onto
+  the students. See **Next**, item 7 — it is the next chunk, not a defect in
+  what is there.
+- **The walkthrough notebook has no group assessment in it.** cw1, cw2 and
+  the quizzes are all individual. The dashboard can now run a leader-managed
+  one and the suite drives it, but nothing a person steps through by hand
+  covers the group path. Worth adding once item 7 lands and a
+  Brightspace-managed group assessment runs the whole way too.
 - **The repo-root shim covers the public API but not submodules.** The repo
   directory is itself called `grader_helper`, so with its parent on
   `sys.path` an `import grader_helper` finds `./__init__.py`, which

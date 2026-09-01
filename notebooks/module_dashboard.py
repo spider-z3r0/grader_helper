@@ -20,8 +20,7 @@ with app.setup():
         sample_for_moderation,
         write_departmental_sheet,
         write_si_marks,
-        assign_graders_groups,
-        assign_graders_individual,
+        allocate_graders,
         brightspace_name_folders,
         catch_grades,
         collect_quiz_marks,
@@ -31,8 +30,6 @@ with app.setup():
         reconcile_marks,
         resolve_multiple_subs,
         save_collated_grades,
-        save_distributed_graders,
-        save_grader_sheets,
         scan_multiple_subs,
     )
     from grader_helper.moderation import BORDERLINE_MODES
@@ -41,6 +38,7 @@ with app.setup():
     )
     from grader_helper.models import (
         COLLECTED_TYPES,
+        GroupSource,
         MODULE_FILENAME,
         STARTER_ASSESSMENTS,
         WEIGHT_TOLERANCE,
@@ -359,6 +357,18 @@ def module_details():
 
 @app.cell
 def assessment_rows(how_many):
+    # One control, not a tick plus a follow-up question, so the form cannot
+    # express the one state module.toml refuses: a group assessment that does
+    # not say where its groups come from. The two kinds share almost nothing
+    # -- where membership is read from, and whether a mark belongs to a team
+    # or to a person -- so there is no sensible default to fall back on.
+    GROUP_CHOICES = {
+        "marked per student": None,
+        "group, made in Brightspace": GroupSource.BRIGHTSPACE,
+        "group, I keep the groups myself": GroupSource.MODULE_LEADER,
+    }
+    _GROUP_LABELS = {source: label for label, source in GROUP_CHOICES.items()}
+
     def _default(index: int) -> dict:
         if index < len(STARTER_ASSESSMENTS):
             return dict(STARTER_ASSESSMENTS[index])
@@ -398,6 +408,15 @@ def assessment_rows(how_many):
                     placeholder="Feedback sheet.xlsx",
                     label="blank feedback sheet",
                 ),
+                "group": mo.ui.dropdown(
+                    options=list(GROUP_CHOICES),
+                    value=_GROUP_LABELS[
+                        GroupSource(default["group_source"])
+                        if default.get("group_source")
+                        else None
+                    ],
+                    label="submitted by",
+                ),
                 "collected": mo.ui.checkbox(
                     value="pass_mark" in default,
                     label="collected from Brightspace exports",
@@ -414,7 +433,7 @@ def assessment_rows(how_many):
         )
 
     rows = mo.ui.array([_row(i) for i in range(int(how_many.value))])
-    return (rows,)
+    return GROUP_CHOICES, rows
 
 
 @app.cell
@@ -431,7 +450,10 @@ def the_form(
                     [row["marks_out_of"], row["weight"], row["grade_cell"]],
                     justify="start",
                 ),
-                mo.hstack([row["graders"], row["rubric"]], justify="start"),
+                mo.hstack(
+                    [row["group"], row["graders"], row["rubric"]],
+                    justify="start",
+                ),
                 mo.hstack(
                     [row["collected"], row["pass_mark"], row["free_passes"]],
                     justify="start",
@@ -469,6 +491,16 @@ def the_form(
                 Ten weekly quizzes, each pass worth 1%, are **one** row —
                 marked out of 10 and worth 10.
 
+                **Submitted by** says whether the work is one student's or a
+                team's, and where the teams come from. *Made in Brightspace*
+                means Brightspace's own groups: they arrive in the class
+                list, and the download has one folder, one feedback sheet and
+                one mark per team. *I keep the groups myself* means the teams
+                are yours, in sheets under the assessment's `groups/` folder;
+                Brightspace knows nothing about them, so the download is the
+                ordinary per-student shape and marks may differ within a
+                team. Either way a whole team goes to one marker.
+
                 **Graders**, the **blank feedback sheet** and the **cell the
                 mark lands in** are what the marking steps read: who gets a
                 workbook, what is copied into each student's folder, and
@@ -491,7 +523,7 @@ def the_form(
 
 
 @app.cell
-def the_specs(rows):
+def the_specs(rows, GROUP_CHOICES):
     def assessment_spec(row: dict) -> dict:
         """One form row as the dict init_module wants.
 
@@ -512,6 +544,14 @@ def the_specs(rows):
         if row["collected"]:
             spec["pass_mark"] = row["pass_mark"]
             spec["free_passes"] = int(row["free_passes"])
+
+        # Both keys or neither. `group = true` on its own does not load, and
+        # `group = false` is the default, so writing it would only add a line
+        # saying what the absence already says.
+        source = GROUP_CHOICES[row["group"]]
+        if source is not None:
+            spec["group"] = True
+            spec["group_source"] = source.value
 
         # What the marking steps read off the model: who marks it, the blank
         # sheet they are given, and the cell their mark lands in. Left out
@@ -696,8 +736,13 @@ def the_class_list(found, loaded):
         if not path.exists():
             return None, f"No class list at `{path}`."
         # Groups have to be asked for at ingest: a group allocation needs the
-        # column, and it is dropped when it is not wanted.
-        grouped = any(a.group for a in module.assessments)
+        # column, and it is dropped when it is not wanted. Only a
+        # Brightspace-managed group assessment has one to ask for -- a
+        # leader-managed one keeps its groups in sheets of its own, and
+        # asking here would refuse a class list that is perfectly correct.
+        grouped = any(
+            a.group_source is GroupSource.BRIGHTSPACE for a in module.assessments
+        )
         try:
             frame = import_brightspace_classlist(path, group=grouped)
         except Exception as exc:
@@ -847,25 +892,15 @@ def the_steps(found):
     """
 
     def allocate_marking(assessment, class_list, replace: bool = False):
-        graders = [g.initials for g in assessment.graders]
-        assign = (
-            assign_graders_groups if assessment.group else assign_graders_individual
-        )
-        # This overwrite is the grader column in the frame, not a file.
-        allocation = assign(class_list, graders, overwrite=True)
-        master = save_distributed_graders(
-            allocation, assessment.folder_path, overwrite=replace
-        )
-        workbooks = save_grader_sheets(
-            allocation,
-            assessment.grading_output_path,
-            graders,
-            criteria=["Mark"],
-            overwrite=replace,
-        )
+        # One call for all three kinds. It picks the allocator, collects a
+        # leader-managed assessment's own group sheets first, and writes a
+        # grader's workbook in the shape that kind of marking comes back in
+        # -- one row per group where Brightspace gives the team one feedback
+        # sheet, one row per student everywhere else.
+        result = allocate_graders(assessment, class_list, overwrite=replace)
         # The artefact is the evidence, not the absence of an exception.
-        found.file.record(master, assessment.id)
-        return master, workbooks, allocation
+        found.file.record(result, assessment.id)
+        return result.allocation, result.workbooks, result.frame
 
     def distribute_sheets(assessment, class_list):
         # Never overwrite: a sheet already in a student's folder may carry a

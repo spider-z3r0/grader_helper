@@ -5,9 +5,11 @@
 
 from .assessment import (
     COLLECTED_TYPES,
+    GROUP_MEMBERSHIP_FILENAME,
     Assessment,
     AssessmentStatus,
     AssessmentType,
+    GroupSource,
     tidy_number,
 )
 from .module import (
@@ -33,6 +35,8 @@ __all__ = [
     "AssessmentType",
     "COLLECTED_TYPES",
     "FolderState",
+    "GroupSource",
+    "GROUP_MEMBERSHIP_FILENAME",
     "Module",
     "ModuleFile",
     "ModuleFolder",

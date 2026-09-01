@@ -40,6 +40,11 @@ from pydantic import (
 
 from .people import Person, as_person
 
+#: What ``build_group_membership`` writes into ``grading_output``. CSV rather
+#: than xlsx because it is a two-column lookup table that wants reading in a
+#: diff, not a workbook.
+GROUP_MEMBERSHIP_FILENAME = "group_membership.csv"
+
 
 class AssessmentType(str, Enum):
     """The kinds of assessment a module can carry.
@@ -59,6 +64,33 @@ class AssessmentType(str, Enum):
 #: anything. Named rather than left inline in the validator so that a form
 #: offering those fields and the model accepting them cannot drift apart.
 COLLECTED_TYPES = (AssessmentType.QUIZ, AssessmentType.MCQ)
+
+
+class GroupSource(str, Enum):
+    """Where a group assessment's group membership comes from.
+
+    The two kinds look nothing like each other on disk, and neither is
+    guessable from the download, so the module has to say which it is.
+
+    ``BRIGHTSPACE``
+        The groups were made in Brightspace. They arrive **in the class
+        list**, as a group column, and the download has **one folder per
+        group** -- one feedback sheet, one mark, shared by the whole team.
+
+    ``MODULE_LEADER``
+        The groups were made by the module leader, in sheets of their own.
+        They have to be collected into one student-id-to-group table before
+        anything can be allocated. The download is the *individual* shape --
+        one folder per student, one feedback sheet each, and marks that may
+        legitimately differ within a group.
+
+    So the flag decides two separate things: where membership is read from,
+    and whether a mark belongs to a team or to a person. Defaulting it would
+    mean guessing at both.
+    """
+
+    BRIGHTSPACE = "brightspace"
+    MODULE_LEADER = "module_leader"
 
 
 class AssessmentStatus(BaseModel):
@@ -114,10 +146,24 @@ class Assessment(BaseModel):
     )
 
     graders: list[Person] = Field(default_factory=list)
+    due_date: str | None = None
+
+    # ---------------------------------------------------------- group policy
     group: bool = Field(
         default=False, description="True where the work is submitted by a group."
     )
-    due_date: str | None = None
+    group_source: GroupSource | None = Field(
+        default=None,
+        description="Where group membership comes from: 'brightspace' (a "
+        "column in the class list, one submission folder per group) or "
+        "'module_leader' (sheets of the leader's own, one submission folder "
+        "per student). Required when group is true.",
+    )
+    group_sheets: str = Field(
+        default="groups",
+        description="Folder of the module leader's own group sheets, relative "
+        "to `folder`. Only read for group_source = 'module_leader'.",
+    )
 
     # --------------------------------------------------------- quiz policy
     #
@@ -182,6 +228,39 @@ class Assessment(BaseModel):
                 f"Assessment {self.id!r} lists the same grader more than once: "
                 f"{sorted(duplicates)}. Grader initials must be unique, because "
                 "each grader gets one workbook named for them."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _a_group_assessment_says_which_kind(self) -> Self:
+        """`group = true` on its own does not say enough to act on.
+
+        The two kinds differ in where membership is read from *and* in
+        whether a mark belongs to a team or a person, so a default would be
+        guessing at both -- and both guesses fail late and quietly. A
+        Brightspace-managed run against a per-student download simply finds
+        no group folders and distributes nothing; a leader-managed run
+        against a class list that already has the groups goes looking for
+        sheets that were never written.
+        """
+        if self.group and self.group_source is None:
+            raise ValueError(
+                f"Assessment {self.id!r} is a group assessment but does not "
+                "say where its groups come from. Set group_source:\n"
+                "  group_source = \"brightspace\"     groups made in "
+                "Brightspace -- they appear as a column in the class list, "
+                "and the download has one folder, one feedback sheet and one "
+                "mark per group\n"
+                "  group_source = \"module_leader\"   groups made by you, in "
+                "sheets of your own -- the download is the individual shape, "
+                "one folder and one feedback sheet per student, and marks may "
+                "differ within a group"
+            )
+        if self.group_source is not None and not self.group:
+            raise ValueError(
+                f"Assessment {self.id!r} sets group_source = "
+                f"{self.group_source.value!r} but group is false, so nothing "
+                "would read it. Set group = true, or drop group_source."
             )
         return self
 
@@ -307,9 +386,38 @@ class Assessment(BaseModel):
         return self.folder_path / self.rubric
 
     @property
+    def group_sheets_path(self) -> pl.Path | None:
+        """The leader's own group sheets, or None where there are none.
+
+        ``None`` unless ``group_source = "module_leader"``: a
+        Brightspace-managed group assessment reads its membership from the
+        class list, so a folder for group sheets would be a folder nothing
+        ever puts anything in.
+        """
+        if self.group_source is not GroupSource.MODULE_LEADER:
+            return None
+        return self.folder_path / self.group_sheets
+
+    @property
+    def group_membership_path(self) -> pl.Path | None:
+        """The collected student-id-to-group table, or None where there is none.
+
+        Written by ``build_group_membership``, and derived entirely from the
+        sheets in ``group_sheets``, so it lives in ``grading_output`` with
+        everything else that can be deleted and regenerated.
+        """
+        if self.group_source is not GroupSource.MODULE_LEADER:
+            return None
+        return self.grading_output_path / GROUP_MEMBERSHIP_FILENAME
+
+    @property
     def directories(self) -> tuple[pl.Path, ...]:
         """Every directory this assessment needs, for init_module to create."""
-        return (self.folder_path, self.submissions_path, self.grading_output_path)
+        wanted = [self.folder_path, self.submissions_path, self.grading_output_path]
+        sheets = self.group_sheets_path
+        if sheets is not None:
+            wanted.append(sheets)
+        return tuple(wanted)
 
 
 def tidy_number(value: float) -> str:

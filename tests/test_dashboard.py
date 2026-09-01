@@ -34,6 +34,7 @@ pytest.importorskip("marimo", reason="marimo is a dev dependency")
 from grader_helper.models import (  # noqa: E402 -- after the skip
     MODULE_FILENAME,
     FolderState,
+    GroupSource,
     ModuleFile,
     init_module,
     load_module,
@@ -347,6 +348,64 @@ def test_a_module_set_up_here_is_ready_to_be_marked(run_dashboard, tmp_path):
     assert [g.initials for g in cw1.graders] == ["KOM", "SOB"]
     assert cw1.grade_cell == "B12"
     assert cw1.rubric_path == folder / "assessments" / "cw1" / "Feedback sheet.xlsx"
+
+
+def test_the_defaults_are_marked_per_student(run_dashboard, tmp_path):
+    """`group = false` is the default, so writing it would only add a line
+    saying what its absence already says."""
+    folder = tmp_path / "PS4034"
+    folder.mkdir()
+
+    shown = run_dashboard(folder)
+
+    for spec in shown.names["specs"]:
+        assert not {"group", "group_source"} & spec.keys(), spec
+
+
+@pytest.mark.parametrize(
+    "choice, source",
+    [
+        ("group, made in Brightspace", "brightspace"),
+        ("group, I keep the groups myself", "module_leader"),
+    ],
+)
+def test_a_group_row_writes_both_keys(run_dashboard, tmp_path, choice, source):
+    """Both or neither. `group = true` on its own does not load, and the
+    form has one control precisely so it cannot produce that state."""
+    folder = tmp_path / "PS4034"
+    folder.mkdir()
+
+    ran = run_dashboard(folder)
+    row = {**ran.names["rows"].value[0], "group": choice}
+
+    spec = ran.names["assessment_spec"](row)
+
+    assert spec["group"] is True
+    assert spec["group_source"] == source
+
+
+def test_a_group_row_makes_a_module_that_loads(run_dashboard, tmp_path):
+    """End of the path: chosen on the form, written, read back off disk."""
+    folder = tmp_path / "PS4034"
+    folder.mkdir()
+
+    ran = run_dashboard(folder)
+    spec_for = ran.names["assessment_spec"]
+    specs = [
+        spec_for({**row, "group": "group, I keep the groups myself"})
+        if i == 0
+        else spec_for(row)
+        for i, row in enumerate(ran.names["rows"].value)
+    ]
+
+    init_module(folder, "PS4034", "Research Methods", "2025/26", "KOM",
+                assessments=specs)
+    written = load_module(folder)
+
+    assert written.assessment("cw1").group_source is GroupSource.MODULE_LEADER
+    # The folder the leader puts their own sheets in has to exist first.
+    assert written.assessment("cw1").group_sheets_path.is_dir()
+    assert written.assessment("cw2").group_source is None
 
 
 def test_what_was_left_blank_is_left_out(run_dashboard, tmp_path):

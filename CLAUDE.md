@@ -51,6 +51,7 @@ should show the import line.
 | the SI upload file | **The SI upload** |
 | status flags, `record()` | **Keeping status** |
 | quizzes, pass marks, free passes | **Quiz collection** |
+| group work, allocating graders | **Group assessments** |
 | the dashboard / app | `docs/dashboard-scope.md` first, then **Pointing at a folder** |
 | what to build next | **Next** |
 | something looks broken | **Known gaps** — it may be known |
@@ -86,6 +87,11 @@ where a session about it starts.
   where it can** (`=E30/2`, not `=E30/100*50`). The long form looks tidier
   and moves marks: `x/2` is exact in floating point and `x/100*50` is not,
   and the total is rounded. See **Building the departmental sheet**.
+- **There are two kinds of group assessment**, and they share almost
+  nothing: Brightspace-managed (groups in the class list, one folder and one
+  mark per team) and leader-managed (groups in the leader's own sheets, the
+  ordinary per-student download). `group = true` without `group_source`
+  refuses to load. See **Group assessments**.
 - `notebooks/grading_walkthrough.py` is deliberately plain and explicit, with
   each assessment written out in full. Do not "improve" it into a selector;
   that is scheduled, and not yet.

@@ -10,6 +10,7 @@ from .models import (
     Assessment,
     AssessmentStatus,
     AssessmentType,
+    GroupSource,
     Module,
     ModuleFile,
     ModulePaths,
@@ -26,6 +27,12 @@ from .ingesting.ingest_completed_graderfiles import (
     ingest_completed_graderfiles,
     save_collated_grades,
 )
+from .ingesting.collect_group_membership import (
+    ConflictingGroupsError,
+    attach_group_membership,
+    collect_group_membership,
+)
+from .ingesting.import_brightspace_classlist import MissingGroupError
 from .ingesting.collect_quiz_marks import (
     DuplicateAttemptError,
     collect_quiz_marks,
@@ -51,8 +58,15 @@ from .dataframe_operations.prepare_data_for_departmental_template import (
     prepare_data_for_departmental_template,
 )
 
-# collating -- the assembly layer, above the packages it reaches into
+# collating and allocating -- the assembly layer, above the packages they
+# reach into
 from .collating import collate_module_marks
+from .allocating import (
+    GraderAllocation,
+    GroupMembership,
+    allocate_graders,
+    build_group_membership,
+)
 
 # the student information system upload
 from .si_upload import (
@@ -102,6 +116,7 @@ __all__ = [
     "Assessment",
     "AssessmentStatus",
     "AssessmentType",
+    "GroupSource",
     "Module",
     "ModuleFile",
     "ModulePaths",
@@ -125,6 +140,10 @@ __all__ = [
     "read_quiz",
     "quiz_name",
     "DuplicateAttemptError",
+    "collect_group_membership",
+    "attach_group_membership",
+    "ConflictingGroupsError",
+    "MissingGroupError",
     "extract_studentid_grade",
     "catch_grades",
     "excel_round",
@@ -147,6 +166,10 @@ __all__ = [
     "read_si_file",
     "student_id_from_key",
     "write_si_marks",
+    "allocate_graders",
+    "build_group_membership",
+    "GraderAllocation",
+    "GroupMembership",
     "brightspace_name_folders",
     "KEEP_CHOICES",
     "resolve_multiple_subs",

@@ -17,6 +17,7 @@ import pytest
 
 from grader_helper.models import (
     MODULE_FILENAME,
+    GroupSource,
     ModuleFile,
     init_module,
     load_module,
@@ -237,6 +238,55 @@ def test_custom_assessments_are_written(tmp_path):
         "Coursework 1 (50)",
         "Coursework 1 (30)",
     ]
+
+
+# ---------------------------------------------------------------------------
+# Group assessments
+# ---------------------------------------------------------------------------
+
+
+GROUP_ASSESSMENTS = [
+    dict(id="cw1", type="coursework", name="Coursework 1", marks_out_of=100,
+         weight=50, group=True, group_source="brightspace"),
+    dict(id="cw2", type="coursework", name="Coursework 2", marks_out_of=100,
+         weight=50, group=True, group_source="module_leader"),
+]
+
+
+def test_group_keys_survive_the_round_trip(tmp_path):
+    """`group = true` on its own no longer loads, so a file that stores it
+    has to store the source beside it."""
+    init_module(
+        tmp_path, "PS4003", "Group Project", "2025/26", "KOM",
+        assessments=GROUP_ASSESSMENTS,
+    )
+
+    module = load_module(tmp_path)
+
+    assert module.assessment("cw1").group_source is GroupSource.BRIGHTSPACE
+    assert module.assessment("cw2").group_source is GroupSource.MODULE_LEADER
+
+
+def test_only_a_leader_managed_assessment_gets_a_groups_folder(tmp_path):
+    """It is where the leader puts their own sheets, so it has to exist
+    before they can. A Brightspace-managed one would never be used."""
+    init_module(
+        tmp_path, "PS4003", "Group Project", "2025/26", "KOM",
+        assessments=GROUP_ASSESSMENTS,
+    )
+
+    assert not (tmp_path / "assessments" / "cw1" / "groups").exists()
+    assert (tmp_path / "assessments" / "cw2" / "groups").is_dir()
+
+
+def test_the_two_kinds_of_group_assessment_are_explained_in_the_file(tmp_path):
+    """The key is not guessable, and getting it wrong fails late."""
+    init_module(tmp_path, "PS4001", "Advanced Research Methods", "2025/26", "KOM")
+
+    text = (tmp_path / MODULE_FILENAME).read_text()
+
+    assert 'group_source = "brightspace"' in text
+    assert 'group_source = "module_leader"' in text
 
 
 def test_a_leader_with_detail_becomes_a_sub_table(tmp_path):

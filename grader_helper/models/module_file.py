@@ -424,6 +424,30 @@ _ASSESSMENT_PREAMBLE = """
 #
 # Eleven quizzes, ten marks, free_passes = 1 is "you may drop one week".
 #
+# A group assessment must say which kind it is, because the two are nothing
+# alike on disk and neither is guessable from the download:
+#
+#   group = true
+#   group_source = "brightspace"     the groups were made in Brightspace, so
+#                                    they come down in the class list as a
+#                                    group column, and the download has one
+#                                    folder, one feedback sheet and one mark
+#                                    per group
+#
+#   group = true
+#   group_source = "module_leader"   the groups are yours, kept in sheets of
+#                                    your own under <folder>/groups/. The
+#                                    download is the ordinary individual
+#                                    shape -- one folder and one feedback
+#                                    sheet per student -- so marks may
+#                                    differ within a group. The sheets are
+#                                    collected into one student-id-to-group
+#                                    table before the marking is
+#                                    allocated
+#
+# Either way a whole group goes to one marker, so a team's work is assessed
+# by one person.
+#
 # The weights must sum to 100. That is checked every time the file loads,
 # because weights that do not sum to 100 make every student's total wrong and
 # the error is invisible until the marks are audited.
@@ -432,7 +456,10 @@ _ASSESSMENT_PREAMBLE = """
 #
 #   <folder>/                  the rubric, and distributed.xlsx once allocated
 #     submissions/             the unzipped Brightspace download
-#     grading_output/          grader workbooks and completed_grades.xlsx
+#     groups/                  your own group sheets, for group_source =
+#                              "module_leader" only
+#     grading_output/          grader workbooks, completed_grades.xlsx, and
+#                              the collected group_membership.csv
 #
 # grading_output holds only what this tool writes, so it can be deleted and
 # regenerated without touching anything you or Brightspace put there.
@@ -451,7 +478,8 @@ def _render_assessment(spec: dict) -> str:
         "id", "type", "name", "marks_out_of", "weight",
         "pass_mark", "free_passes",
         "folder", "submissions", "grading_output",
-        "rubric", "grade_cell", "graders", "group", "due_date",
+        "rubric", "grade_cell", "graders",
+        "group", "group_source", "group_sheets", "due_date",
     ]
     lines = ["", "[[assessment]]"]
     for key in ordered:
