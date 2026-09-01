@@ -284,7 +284,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 699 tests on Linux and 700 with a real Excel:
+Done, 702 tests on Linux and 703 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -1905,6 +1905,23 @@ The one-folder test is `len(folders) == 1 and any(p.is_dir() for p in
 folders[0].iterdir())`, not `len(folders) == 1`: a cohort of one, or the
 last folder left after resolving the others, is a student folder, and a
 student folder holds files rather than folders.
+
+#### `is_dir` on a thing that may be a file
+
+`group_sheets` was made to name **a folder of sheets or one file**, and the
+step that blocks allocation kept asking `is_dir()`. So a module with
+`group_sheets = "groups.xlsx"` -- collected, 85 students in 43 groups,
+written to `group_membership.csv` -- was told *"there are no sheets at
+…\groups.xlsx"* about a workbook sitting exactly where it had been asked
+for. `exists()`, and the message says "nothing at" rather than "no sheets
+at", which is true of both shapes.
+
+Two things worth keeping from it. The check now resolves through
+`groups_where`, so a file **picked on the page but not yet remembered**
+unblocks the step as well -- picked wins everywhere or it wins nowhere. And
+the reason it survived a change that was specifically about files is that
+the test for it used the folder layout: the feature grew a second shape and
+its guard was only ever exercised in the first.
 
 #### The one place a test cannot reach
 

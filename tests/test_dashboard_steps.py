@@ -566,7 +566,7 @@ def test_allocation_says_when_there_are_no_group_sheets(
 
     again = dashboard(leader_managed_module)
 
-    assert "no sheets at" in again["blocking"]("group sheets")[0]
+    assert "nothing at" in again["blocking"]("group sheets")[0]
 
 
 def test_an_individual_assessment_has_no_group_sheets_to_miss(
@@ -865,3 +865,55 @@ def test_a_cohort_with_nobody_missing_reports_no_strangers(
     _, _, strangers = names["collect_groups"](cw1, names["class_list"])
 
     assert strangers == []
+
+
+def test_a_groups_file_does_not_read_as_no_sheets(one_groups_file, dashboard):
+    """`group_sheets` names a folder of sheets OR one file holding the lot.
+    Asking whether a file `is_dir` said there was nothing there, about a
+    workbook sitting exactly where it had been asked for -- and blocked
+    allocation on it."""
+    names = dashboard(one_groups_file)
+    names["remember_group_sheets"](
+        names["found"].module.assessment("cw1"),
+        one_groups_file / "assessments" / "cw1" / "groups.xlsx",
+    )
+
+    again = dashboard(one_groups_file)
+
+    assert again["found"].module.assessment("cw1").group_sheets == "groups.xlsx"
+    assert again["blocking"]("group sheets") == []
+
+
+def test_a_groups_file_that_is_not_there_still_blocks(one_groups_file, dashboard):
+    names = dashboard(one_groups_file)
+    names["remember_group_sheets"](
+        names["found"].module.assessment("cw1"),
+        one_groups_file / "assessments" / "cw1" / "groups.xlsx",
+    )
+    (one_groups_file / "assessments" / "cw1" / "groups.xlsx").unlink()
+
+    again = dashboard(one_groups_file)
+    reasons = again["blocking"]("group sheets")
+
+    assert reasons and "groups.xlsx" in reasons[0]
+
+
+def test_allocation_runs_from_a_groups_file(one_groups_file, dashboard):
+    """The whole path, which is what was blocked: one file, collected inside
+    allocation, joined onto the class list, whole teams to one marker."""
+    names = dashboard(one_groups_file)
+    names["remember_group_sheets"](
+        names["found"].module.assessment("cw1"),
+        one_groups_file / "assessments" / "cw1" / "groups.xlsx",
+    )
+
+    again = dashboard(one_groups_file)
+    cw1 = again["found"].module.assessment("cw1")
+    assert again["blocking"]("class list", "graders", "group sheets") == []
+
+    master, workbooks, allocation = again["allocate_marking"](
+        cw1, again["class_list"]
+    )
+
+    assert master.students == len(again["class_list"])
+    assert (allocation.groupby("Group")["grader"].nunique() == 1).all()

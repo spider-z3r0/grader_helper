@@ -969,13 +969,26 @@ def step_options(loaded):
 
 
 @app.cell
-def why_not(chosen, collected, class_list, repeats, submissions_state):
+def why_not(
+    chosen, collected, class_list, repeats, submissions_state, groups_where,
+):
     def blocking(*needs: str) -> list[str]:
         """What is missing before a step can run, in words."""
         if chosen is None:
             return ["no assessment chosen"]
         if collected:
             return ["nobody marks this one — it is collected from Brightspace"]
+        # Where the group sheets are: what module.toml says, or the file
+        # picked on the page. `exists`, not `is_dir` -- group_sheets names a
+        # folder of sheets OR one file holding the lot, and asking whether a
+        # file is a directory says there is nothing there about a workbook
+        # sitting right where it was asked for.
+        sheets = (
+            groups_where(chosen)[0]
+            if chosen.group_sheets_path is not None
+            else None
+        )
+
         reasons = {
             "class list": "the class list has not been read",
             "graders": "this assessment has no graders in module.toml",
@@ -994,7 +1007,7 @@ def why_not(chosen, collected, class_list, repeats, submissions_state):
             ),
             "group sheets": (
                 "this is a group assessment whose groups you keep yourself, "
-                f"and there are no sheets at `{chosen.group_sheets_path}`"
+                f"and there is nothing at `{sheets}`"
             ),
         }
         have = {
@@ -1011,10 +1024,7 @@ def why_not(chosen, collected, class_list, repeats, submissions_state):
             # Only leader-managed groups have sheets to be missing. A
             # Brightspace-managed one gets its groups from the class list,
             # which is already a need of its own.
-            "group sheets": (
-                chosen.group_sheets_path is None
-                or chosen.group_sheets_path.is_dir()
-            ),
+            "group sheets": sheets is None or sheets.exists(),
         }
         return [reasons[need] for need in needs if not have[need]]
 
