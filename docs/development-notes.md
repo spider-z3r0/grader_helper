@@ -281,7 +281,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 622 tests on Linux and 623 with a real Excel:
+Done, 647 tests on Linux and 648 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -319,6 +319,9 @@ Done, 622 tests on Linux and 623 with a real Excel:
 - Group assessments: the two kinds distinguished in `module.toml`, the
   leader's own group sheets collected, and allocation wired to the
   assessment -- see **Group assessments**
+- `simulate-marking`: fills in marks nobody marked, on both records and
+  with deliberate discrepancies, so everything after marking can be run
+  -- see **Simulating the marking**
 
 ### The rewire onto `Module`
 
@@ -1763,6 +1766,79 @@ somewhere — an all-caps surname alone is not enough to trip it.
 because by the time the restore refuses, the append has already happened. The
 only real recovery is to delete the log and re-download; nothing can
 reconstruct a name that was overwritten.
+
+### Simulating the marking
+
+Everything after allocation needs marks to exist, and producing them by
+marking real work is not a thing you can do twice. `grader_helper/simulating.py`
+is the stand-in for **steps 5 and 6** -- the grader writing a mark on the
+feedback sheet, and the grader copying it into their own workbook:
+
+```
+uv run simulate-marking ~/scratch/PS4001                 # the plan
+uv run simulate-marking ~/scratch/PS4001 --write         # do it
+uv run simulate-marking ~/scratch/PS4001 -a cw1 -d 2 --write
+```
+
+**It writes both records, not one.** They are two records and step 7 exists
+because they can disagree, so `--discrepancies N` has the grader *mistype* N
+of them into their workbook while the sheet keeps the mark the student
+received. Without that, every reconciliation trivially passes and
+`reconcile_marks` can never be seen working. With it:
+
+```
+  cw1: wrote 12 feedback sheet(s) for 11 student(s), 1 planted discrepancy
+      planted: 23304305 sheet 39.5 vs workbook 29.5
+```
+
+and `reconcile_marks` names exactly that student.
+
+**The marks are not uniform, and not entirely random.** A uniform cohort
+puts a tenth of the class in every band, which makes a stratified moderation
+sample look easy and a grade distribution look like nothing. So the draw is
+roughly where a psychology cohort sits -- mean 0.58 of the scale, sd 0.15 --
+and `--boundaries N` *plants* N marks on the values the arithmetic can get
+wrong and a random draw almost never hits: every band edge, zero (which is
+NG, not F), and the halves Python and Excel round in opposite directions.
+`round(64.5)` is 64 and Excel's is 65, and 64 is a B3 where 65 is a B2. A
+cohort with no exact halves in it never tests the rule this project has a
+house note about.
+
+Three things it will not do to a module:
+
+- a feedback sheet whose grade cell already holds a **number** is skipped,
+  so a part-marked assessment survives a careless run;
+- a `Mark` a grader has already written is left alone;
+- the command line **shows the plan and writes nothing** without `--write`.
+
+Writing a number into the grade cell *replaces the formula there*. That is
+unavoidable -- a real rubric totals criterion cells this knows nothing about
+-- and it is the reason to point it at a copy.
+
+#### Two things it found
+
+**A resubmission is two sheets.** The first version keyed sheets by student
+id into a `dict`, so a student with two submission folders had one of their
+two sheets marked and the other left blank. `catch_grades` reads every sheet
+it finds, so the result was a warning about an empty cell on a student who
+had been marked. `feedback_sheets` returns a **list per identifier** now.
+Resubmissions are a normal state -- nothing renames those folders until
+somebody decides which counts -- so this is the shape, not an edge case.
+
+**One seed is not one cohort.** Two `Random(seed)` objects make the same
+first choice, so drawing the boundary marks and choosing who mistypes one
+off separate streams put every discrepancy on a planted mark, every run. One
+stream, threaded through. And one seed for the whole *module* gave every
+student the same mark in cw1 as in cw2 -- reproducible and useless, because
+the total then equals the component and a weighting bug looks exactly like a
+correct answer. The command line derives a per-assessment seed with
+`zlib.crc32` of the id, rather than `hash`, which is salted per process.
+
+Every guard was verified by reintroducing the bug: only the last sheet per
+student marked, the discrepancy dropped, the slip written to the sheet as
+well as the workbook, separate random streams, already-marked sheets
+overwritten by default, a dry run writing anyway, and a grader's own mark
+clobbered.
 
 ### The fake module, and the end-to-end test
 

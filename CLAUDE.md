@@ -16,6 +16,9 @@ wasted here.
 - **`uv run pytest -q`** is the suite. It should be green before and after
   you touch anything; the count is in the notes' "Where the work stands".
 - **`uv run`, never bare `python`.** The venv is not on the path.
+- **`uv sync` re-resolves and will upgrade the lock.** Use `uv sync
+  --frozen` to install what `uv.lock` pins. A plain `uv sync` here pulled
+  pandas 3 in and broke three tests that assert on dtypes.
 
 ## Non-negotiables
 
@@ -53,6 +56,7 @@ should show the import line.
 | quizzes, pass marks, free passes | **Quiz collection** |
 | group work, allocating graders | **Group assessments** |
 | the dashboard / app | `docs/dashboard-scope.md` first, then **Pointing at a folder** |
+| testing without marking | **Simulating the marking** |
 | what to build next | **Next** |
 | something looks broken | **Known gaps** — it may be known |
 

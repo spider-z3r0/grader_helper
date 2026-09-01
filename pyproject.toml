@@ -28,6 +28,19 @@ dependencies = [
 ]
 requires-python = ">=3.13"
 
+# A terminal command for the marking simulator, so it runs without -m --
+# which warns, because the repo directory is itself called grader_helper and
+# holds a shim __init__.py, so the package is already imported by the time
+# runpy goes looking for the submodule.
+#
+# This table sits after every one of [project]'s scalars, not before them.
+# A scalar written after a sub-table is parsed INTO that sub-table, which is
+# the same hazard module.toml's writer is built around -- and putting this
+# above `dependencies` really did move the dependency list into
+# [project.scripts] and break the build.
+[project.scripts]
+simulate-marking = "grader_helper.simulating:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

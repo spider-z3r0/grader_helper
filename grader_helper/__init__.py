@@ -64,6 +64,16 @@ from .dataframe_operations.prepare_data_for_departmental_template import (
     prepare_data_for_departmental_template,
 )
 
+# simulating -- a testing aid, not part of running a module. It writes marks
+# into real feedback sheets and grader workbooks so the steps after marking
+# can be run without anyone marking anything.
+from .simulating import (
+    SimulatedMarking,
+    draw_marks,
+    feedback_sheets,
+    simulate_marking,
+)
+
 # collating and allocating -- the assembly layer, above the packages they
 # reach into
 from .collating import collate_module_marks
@@ -165,6 +175,10 @@ __all__ = [
     "check_for_weighted_columns",
     "prepare_data_for_departmental_template",
     "collate_module_marks",
+    "simulate_marking",
+    "draw_marks",
+    "feedback_sheets",
+    "SimulatedMarking",
     "Pack",
     "Sample",
     "build_moderation_pack",
