@@ -217,13 +217,10 @@ def collect_group_membership(
     id_column : str, optional
         The column holding the student id, when it is not one of the names
         recognised automatically -- see ``STUDENT_ID_ALIASES``.
-    group_column : str or sequence of str, optional
+    group_column : str, optional
         The column holding the group, for sheets that carry one. Given
-        explicitly, every sheet must have it. A sequence composes one key
-        from several columns -- ``["Cohort", "Team"]`` over ``2A`` and
-        ``1`` gives ``2A_1`` -- which is what a sheet whose team numbers
-        restart per cohort needs. A column that is not a group is refused;
-        see ``NEVER_A_GROUP``.
+        explicitly, every sheet must have it, and it may be any column --
+        only automatic detection is restricted to ``Group`` and ``Team``.
 
     Returns
     -------
@@ -241,7 +238,7 @@ def collect_group_membership(
     ConflictingGroupsError
         If a student appears in two different groups.
     AmbiguousGroupError
-        If a sheet has several columns that could be the group and they
+        If a sheet has both a ``Group`` and a ``Team`` column and they
         disagree about who is in a team with whom.
 
     Examples

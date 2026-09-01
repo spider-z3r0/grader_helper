@@ -96,13 +96,10 @@ def test_an_individual_assessment_stays_individual_by_default():
 
 def test_a_group_column_can_be_recorded_on_the_assessment():
     """Asked once in module.toml, not on every run."""
-    one = Assessment(**_spec(group=True, group_source="module_leader",
-                             group_column="Group"))
-    composed = Assessment(**_spec(group=True, group_source="module_leader",
-                                  group_column=["Cohort", "Team"]))
+    a = Assessment(**_spec(group=True, group_source="module_leader",
+                           group_column="Group"))
 
-    assert one.group_column == "Group"
-    assert composed.group_column == ["Cohort", "Team"]
+    assert a.group_column == "Group"
 
 
 def test_a_group_column_without_group_is_refused():
@@ -479,58 +476,14 @@ def test_columns_that_disagree_are_refused_not_ranked(ml_groups_file):
     assert "PS4001 groups.xlsx" in message
 
 
-@pytest.mark.parametrize(
-    "asked", ["Grp Code", "grp code", "GRP_CODE", "Group Code", "groupcode"]
-)
-def test_a_group_code_is_never_the_group(ml_groups_file, asked):
-    """It is produced elsewhere, for something else, and only looks like the
-    group because the group label is built out of it -- '2A_1' contains
-    '2A'. Allocating on it puts students who are not in a team together in
-    front of one grader, with team names that read perfectly."""
-    with pytest.raises(ValueError, match="is not the group"):
-        collect_group_membership(ml_groups_file, group_column=asked)
 
 
-def test_a_group_code_cannot_be_composed_into_the_key_either(ml_groups_file):
-    """The way it was previously suggested, which is where the danger was."""
-    with pytest.raises(ValueError, match="is not the group"):
-        collect_group_membership(
-            ml_groups_file, group_column=["Grp Code", "Team"]
-        )
-
-
-def test_a_group_code_is_never_offered_as_the_answer(ml_groups_file):
-    """The ambiguity message used to name it as the composed example."""
-    with pytest.raises(AmbiguousGroupError) as excinfo:
-        collect_group_membership(ml_groups_file)
-
-    assert "Grp Code" not in str(excinfo.value).split("Columns here:")[0]
 
 
 def test_naming_the_column_settles_it(ml_groups_file):
     membership = collect_group_membership(ml_groups_file, group_column="Group")
 
     assert membership["Group"].tolist() == ["2A_1", "2A_1", "2A_2", "2B_1"]
-
-
-def test_a_group_key_can_be_composed_from_two_columns(tmp_path):
-    """The case with no combined column at all: the cohort and the team
-    are only a group together. Alone, team 1 of 2A and team 1 of 2B are
-    one team."""
-    path = tmp_path / "groups.xlsx"
-    pd.DataFrame(
-        {
-            "Student Id": ["12345678", "12345679", "12345680"],
-            "Team": [1, 2, 1],
-            "Cohort": ["2A", "2A", "2B"],
-        }
-    ).to_excel(path, index=False)
-
-    membership = collect_group_membership(
-        path, group_column=["Cohort", "Team"]
-    )
-
-    assert membership["Group"].tolist() == ["2A_1", "2A_2", "2B_1"]
 
 
 def test_columns_that_agree_are_not_worth_asking_about(tmp_path):
@@ -548,32 +501,6 @@ def test_columns_that_agree_are_not_worth_asking_about(tmp_path):
     membership = collect_group_membership(path)
 
     assert membership["Group"].nunique() == 2
-
-
-def test_a_composed_key_with_a_blank_part_is_no_group_at_all(tmp_path):
-    """'2A_' is a group as far as everything downstream is concerned, so a
-    student missing a team stays visibly without one -- and is named by the
-    same refusal as a student left off the sheets entirely."""
-    path = tmp_path / "groups.csv"
-    pd.DataFrame(
-        {"Student Id": ["12345678", "12345679"],
-         "Cohort": ["2A", "2A"],
-         "Team": ["1", None]}
-    ).to_csv(path, index=False)
-
-    membership = collect_group_membership(
-        path, group_column=["Cohort", "Team"]
-    )
-
-    blank = membership.loc[membership["Student ID"] == "12345679", "Group"]
-    assert blank.isna().all(), "a half key is not a group"
-
-    class_list = pd.DataFrame(
-        {"Student ID": ["12345678", "12345679"],
-         "Last Name": ["A", "B"], "First Name": ["a", "b"], "Score": ["", ""]}
-    )
-    with pytest.raises(MissingGroupError, match="12345679"):
-        attach_group_membership(class_list, membership)
 
 
 # ---------------------------------------------------------------------------

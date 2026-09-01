@@ -562,14 +562,14 @@ _ASSESSMENT_PREAMBLE = """
 # Either way a whole group goes to one marker, so a team's work is assessed
 # by one person.
 #
-# Where a sheet has more than one column that could be the group -- a Team,
-# a cohort code and a combined Group, say -- and they disagree about who is in
-# a team with whom, loading refuses rather than guessing. Answer it once:
+# A group column has to be called Group or Team -- those two, in any casing,
+# and nothing else is picked for you. Where a sheet has both and they
+# disagree about who is in a team with whom, loading refuses rather than
+# guessing. Answer it once:
 #
-#   group_column = "Group"                 one column holds the whole key
-#   group_column = ["Cohort", "Team"]      composed, joined with "_", so 2A
-#                                          and 1 become "2A_1", for team
-#                                          numbers that restart per cohort
+#   group_column = "Group"     or "Team". It also names a column called
+#                              neither, which is then used because you said
+#                              so rather than because it was guessed at
 #
 # The weights must sum to 100. That is checked every time the file loads,
 # because weights that do not sum to 100 make every student's total wrong and

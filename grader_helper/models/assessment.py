@@ -166,13 +166,12 @@ class Assessment(BaseModel):
         "with a suffix is taken to be a file. Only read for "
         "group_source = 'module_leader'.",
     )
-    group_column: str | list[str] | None = Field(
+    group_column: str | None = Field(
         default=None,
-        description="Which column holds the group, where more than one could "
-        "and they disagree. A list composes one key from several columns: "
-        "['Cohort', 'Team'] over 2A and 1 gives '2A_1'. Left unset the "
-        "column is found automatically, and an ambiguity is refused rather "
-        "than guessed at.",
+        description="Which column holds the group, for a sheet carrying both "
+        "a Group and a Team that disagree, or one whose column is called "
+        "neither. Left unset the column is found automatically, and a "
+        "disagreement is refused rather than guessed at.",
     )
 
     # --------------------------------------------------------- quiz policy

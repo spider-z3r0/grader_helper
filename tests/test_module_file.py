@@ -344,7 +344,7 @@ def test_every_comment_survives_adding_a_key(commented_module):
     before = (commented_module / MODULE_FILENAME).read_text(encoding="utf-8")
 
     ModuleFile.load(commented_module).set_assessment(
-        "Assignment 1", group_column=["Cohort", "Team"]
+        "Assignment 1", group_column="Team"
     )
 
     after = (commented_module / MODULE_FILENAME).read_text(encoding="utf-8")

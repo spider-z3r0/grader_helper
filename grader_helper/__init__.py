@@ -34,7 +34,6 @@ from .ingesting.collect_group_membership import (
     collect_group_membership,
 )
 from .ingesting.import_brightspace_classlist import (
-    GROUP_KEY_SEPARATOR,
     MissingGroupError,
     group_key,
     resolve_group_column,
@@ -164,7 +163,6 @@ __all__ = [
     "AmbiguousGroupError",
     "ConflictingGroupsError",
     "MissingGroupError",
-    "GROUP_KEY_SEPARATOR",
     "group_key",
     "resolve_group_column",
     "extract_studentid_grade",

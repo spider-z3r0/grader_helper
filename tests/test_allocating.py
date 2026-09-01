@@ -455,22 +455,22 @@ def test_the_assessment_can_answer_which_column(tmp_path, classlist):
     assert (allocation.frame.groupby("Group")["grader"].nunique() == 1).all()
 
 
-def test_a_composed_group_column_is_read_off_the_assessment(tmp_path, classlist):
-    """No combined column in the sheet at all -- the cohort and the team
-    are only a group together, and team 1 of 2A is not team 1 of 2B."""
+def test_naming_team_instead_is_honoured(tmp_path, classlist):
+    """The other of the two. A sheet whose teams are numbered straight
+    through the cohort says Team and means it."""
     a = make_module(
         tmp_path, group=True, group_source="module_leader",
-        group_column=["Cohort", "Team"],
+        group_column="Team",
     ).assessment("cw1")
     _ml_sheet(
         a.group_sheets_path,
         **{
             "Student Id": [f"2330430{i}" for i in range(6)],
-            "Team": [1, 1, 2, 2, 1, 1],
-            "Cohort": ["2A"] * 4 + ["2B"] * 2,
+            "Team": [1, 1, 2, 2, 3, 3],
+            "Group": ["2A_1", "2A_1", "2A_2", "2A_2", "2B_1", "2B_1"],
         },
     )
 
     allocation = allocate_graders(a, classlist, seed=1)
 
-    assert sorted(allocation.frame["Group"].unique()) == ["2A_1", "2A_2", "2B_1"]
+    assert sorted(allocation.frame["Group"].unique()) == ["1", "2", "3"]

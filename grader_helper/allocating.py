@@ -63,10 +63,7 @@ from .ingesting.collect_group_membership import (
     attach_group_membership,
     collect_group_membership,
 )
-from .ingesting.import_brightspace_classlist import (
-    group_key,
-    resolve_group_column,
-)
+from .ingesting.import_brightspace_classlist import resolve_group_column
 from .models import Assessment, GroupSource
 
 #: The column a grader writes their mark into. ``collating.MARK_COLUMN`` reads
@@ -130,7 +127,7 @@ def build_group_membership(
     save: bool = True,
     source: pl.Path | None = None,
     id_column: str | None = None,
-    group_column: "str | Sequence[str] | None" = None,
+    group_column: str | None = None,
 ) -> GroupMembership:
     """
     Collect a leader-managed assessment's group sheets into one table.
@@ -148,7 +145,7 @@ def build_group_membership(
     source : pathlib.Path, optional
         Where the sheets are, overriding ``group_sheets``. A folder of them
         or one file holding the lot. For trying a file before recording it.
-    id_column, group_column : str or sequence of str, optional
+    id_column, group_column : str, optional
         Passed through to :func:`collect_group_membership` for sheets whose
         columns are named unusually. ``group_column`` defaults to the
         assessment's own, so a module that has answered the question in
@@ -200,8 +197,8 @@ def build_group_membership(
 
 
 def _group_column_for(
-    assessment: Assessment, override: "str | Sequence[str] | None"
-) -> "str | Sequence[str] | None":
+    assessment: Assessment, override: str | None
+) -> str | None:
     """Which column holds the group: this call's answer, or the module's.
 
     One definition, used by both the leader-managed and the Brightspace
@@ -241,7 +238,7 @@ def allocate_graders(
     seed: int | None = None,
     overwrite: bool = False,
     criteria: Sequence[str] | None = (MARK_COLUMN,),
-    group_column: "str | Sequence[str] | None" = None,
+    group_column: str | None = None,
     grader_column: str = GRADER_COLUMN,
 ) -> GraderAllocation:
     """
@@ -277,10 +274,9 @@ def allocate_graders(
         Empty columns appended to each grader's workbook for them to fill
         in. Defaults to one ``Mark`` column, which is what
         ``collate_module_marks`` reads back.
-    group_column : str or sequence of str, optional
-        The column holding the group, overriding the assessment's own. A
-        sequence composes one key from several columns. Only read for a
-        group assessment.
+    group_column : str, optional
+        The column holding the group, overriding the assessment's own. Only
+        read for a group assessment.
     grader_column : str
         The column the allocation is written into.
 
@@ -387,12 +383,6 @@ def allocate_graders(
                 ) from exc
 
             with_groups = class_list
-            if not isinstance(column, str):
-                # A composed key has to become a real column before anything
-                # can allocate over it or sort by it.
-                with_groups = class_list.copy()
-                with_groups["Group"] = group_key(class_list, column)
-                column = "Group"
 
         allocated = assign_graders_groups(
             with_groups,

@@ -284,7 +284,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 700 tests on Linux and 701 with a real Excel:
+Done, 696 tests on Linux and 697 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -876,80 +876,71 @@ left open, an id column called almost anything.
 
 #### Which column is the group
 
-A leader's own file routinely carries several columns that all look like the
-group, and an id column named however they type it:
+**A group column is called `Group` or `Team`.** Those two, in any casing,
+with spaces and underscores ignored — and *nothing else is picked
+automatically*. Not `Group Name`, which is what Brightspace's own group
+function exports; not `Groups`, `Grouping` or `Team Name`; and not a code
+that looks like one.
+
+That is narrower than it started, and the narrowing is the point. A leader's
+sheet carries several columns that read like the group without being it:
 
 ```
-Name          Student Id   Team   Cohort   Group
-LAST FIRST    12345678     1      2A       2A_1
-LAST4 FIRST4  12345681     1      2B       2B_1
+Name          Student Id   Team   Grp Code   Group
+LAST FIRST    12345678     1      2A         2A_1
+LAST4 FIRST4  12345681     1      2B         2B_1
 ```
 
-`Student Id` is a non-issue — `_normalise_column` ignores case, spaces and
-underscores for the *lookup*, and the frame comes back with `Student ID`
-whatever the sheet said, because that is what everything downstream merges
-on.
+`Grp Code` is produced elsewhere, for something else, and looks like the
+group only because the group label is built out of it — `2A_1` contains
+`2A`. It was never in the alias list and never found automatically. What did
+the damage was the code **recommending** it: the ambiguity message offered
+`["Grp Code", "Team"]` as its worked example of a composed key, and so did
+the `module.toml` comment, two docstrings and `CLAUDE.md`. A suggestion is
+not neutral when the reader is looking for something to type.
 
-`Team` and `Group` are the problem, and it is not a naming problem. Both are
-recognised aliases, and **they are not the same partition**: on `Team` those
-two students are one team, on `Group` they are two. Alias order picks `Group`
-and is right here — by luck, because "group" precedes "team" in a tuple.
-Reorder the tuple and two teams reach one grader as one team, with one mark
-between them, and nothing about the result looks wrong.
+The first fix was a blocklist that refused it by name. That was the wrong
+shape — it answered "which columns are forbidden" when the useful question
+is "which columns are the group", and every column not on the list stayed
+quietly eligible. **A closed list of two is the whole rule**, and it needs
+no exceptions.
 
-So `resolve_group_column` reads the **data**, not the names. It compares the
-partitions each candidate induces, and:
+Naming a column explicitly is not restricted, and must not be: `group_column`
+takes any column in the sheet. The difference is that naming one is a
+decision somebody made, and picking one is a guess the code made.
 
-- one candidate, or several that **agree** → use it, and do not ask; which
-  one is used cannot change a single allocation
-- several that **disagree** → refuse, saying how many groups each makes and
-  what to pass
+`Team` and `Group` are both the group column by name, and **they are not the
+same partition**: in the sheet above those two students are one team on
+`Team` and two on `Group`. Picking by alias order would be right by luck.
+So `resolve_group_column` reads the **data** — it compares the partitions
+each induces, and:
+
+- one of them, or both **agreeing** → use it, and do not ask; which one is
+  used cannot change a single allocation
+- both **disagreeing** → refuse, saying how many groups each makes and to
+  name one
 
 Two columns cut a frame the same way iff their common refinement is no finer
-than either of them, which is the whole test: `groupby(a).ngroups ==
-groupby([a, b]).ngroups == groupby(b).ngroups`.
+than either: `groupby(a).ngroups == groupby([a, b]).ngroups ==
+groupby(b).ngroups`.
 
-`group_column` accepts **a list**, composed into one key with
-`GROUP_KEY_SEPARATOR` (`_`): `["Cohort", "Team"]` over `2A` and `1` gives
-`2A_1`. That is the sheet with no combined column at all, where `Team` alone
-merges team 1 of 2A with team 1 of 2B. The separator matches what a leader
-writes in their own combined column, which is where the convention comes
-from.
+**Composed keys are gone.** `group_column` took a list and joined the parts
+with `_`, so a sheet with no combined column could say cohort `2A` team `1`
+is `2A_1`. With only two names accepted there is nothing sensible left to
+compose — `["Group", "Team"]` is the only pair available and it is
+meaningless — and the feature existed mainly to make the group code look
+usable. `GROUP_KEY_SEPARATOR` went with it. `group_key` stays, for the one
+thing it does that matters:
 
-**A blank part makes the whole key blank** — not `"nan"`, and not a half-key
-like `"2A_"`. Both of those are groups as far as everything downstream is
-concerned, and a student with no group has to stay visibly without one. The
-first version of `group_key` did `astype(str)` and turned `None` into
-`"nan"`; five existing tests caught it immediately. The same defect was
-already sitting in `attach_group_membership`, where it was **not** caught —
-every student without a group was being allocated together as a team called
-`nan`, one grader, one mark, no error anywhere. Found by writing the
-composed-key test, which is the argument for writing them.
-
-##### A group code is never the group
-
-One column on that sheet is **not** a candidate and must not be composed
-into the key either. A group code is produced elsewhere, for something else,
-and looks like the group only because the group label is built out of it --
-`2A_1` contains `2A`. Allocating on it puts students who are not in a team
-together in front of one grader, under team names that read perfectly.
-
-It was never *found* automatically -- it is not in `GROUP_COLUMN_ALIASES`
-and never was. What did the damage was the code **recommending** it: the
-ambiguity message named `["Grp Code", "Team"]` as the worked example of a
-composed key, and so did the `module.toml` comment, two docstrings and
-`CLAUDE.md`. A suggestion is not neutral when the reader is looking for
-something to type.
-
-`NEVER_A_GROUP` now refuses it by name, alone or as part of a composed key,
-and the suggestions are a neutral placeholder plus the sheet's actual
-columns. The refusal is a **name** rule, which is the opposite of the
-principle above -- and deliberately so: "which of these columns is the
-group" is a question about the data, but "this column is not a group at all"
-is a fact about the department, of the same kind as `SOLO_ALIASES`.
+**A blank group stays blank** — not `"nan"`. `astype(str)` turns a missing
+group into that string, which is not blank, so the missing-group refusal
+never fires and every student without a group is allocated together as a
+team called `nan`: one grader, one mark, no error anywhere. That defect was
+live in `attach_group_membership` and found by a test written for something
+else.
 
 `Assessment.group_column` records the answer in `module.toml`, so a leader
-whose sheets always look like this answers once and never again. One helper,
+whose sheets always look like this answers once. One helper,
 `_group_column_for`, resolves override-or-assessment for both the
 leader-managed and the Brightspace path — there were briefly two, and each
 hid the other going missing under mutation.

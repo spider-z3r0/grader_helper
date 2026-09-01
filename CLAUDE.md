@@ -99,13 +99,12 @@ where a session about it starts.
 - **`module.toml` keys: `save` never adds one, `set_assessment` /
   `set_paths` do.** Appending puts a key after the table's trailing comment,
   which tomlkit then binds to the wrong table. `add_key` inserts above it.
-- **Which column is the group is decided by the data, not the name.** A
-  leader's sheet often has `Team`, a cohort code and `Group` all at once,
-  and
-  they are different partitions. `resolve_group_column` refuses when
-  candidates disagree; `group_column` in `module.toml` answers it once, and
-  takes a list to compose a key (`["Cohort", "Team"]` → `2A_1`). A group
-  code is **never** the group: see `NEVER_A_GROUP`.
+- **A group column is called `Group` or `Team`, and nothing else is picked
+  automatically** — not `Group Name`, not a code that looks like one. A
+  sheet has several columns that read like the group without being it.
+  Where both are present and they disagree, `resolve_group_column` refuses
+  rather than guessing; `group_column` in `module.toml` answers it once, and
+  can name any column, because that is a decision somebody made.
 - `notebooks/grading_walkthrough.py` is deliberately plain and explicit, with
   each assessment written out in full. Do not "improve" it into a selector;
   that is scheduled, and not yet.

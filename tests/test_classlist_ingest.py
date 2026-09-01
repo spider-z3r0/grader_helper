@@ -40,7 +40,7 @@ def classlist_file(resources_dir):
 def group_classlist_file(classlist_file, tmp_path):
     """The same export with a Group Name column, as a group assignment has."""
     df = pd.read_excel(classlist_file)
-    df["Group Name"] = [f"Team {i % 5 + 1}" for i in range(len(df))]
+    df["Group"] = [f"Team {i % 5 + 1}" for i in range(len(df))]
     out = tmp_path / "fake_class_list_groups.xlsx"
     df.to_excel(out, index=False)
     return out
@@ -147,17 +147,16 @@ def _classlist_with_group_column(classlist_file, tmp_path, column_name):
 @pytest.mark.parametrize(
     "column_name",
     [
-        "Group Name",   # what Brightspace's group function exports
-        "Group",        # already normalised
-        "group name",   # module leader, lowercase
-        "GROUP NAME",   # module leader, shouting
-        "group",
-        "Groups",
+        "Group",        # the two names, and
+        "group",        # any way of casing or spacing them
+        "GROUP",
+        " Group ",
         "Team",         # a module leader thinking in teams
-        "Group_Name",
+        "team",
+        "TEAM",
     ],
 )
-def test_group_column_is_found_however_it_is_named(
+def test_the_two_group_column_names_are_found(
     classlist_file, tmp_path, column_name
 ):
     path = _classlist_with_group_column(classlist_file, tmp_path, column_name)
@@ -167,6 +166,35 @@ def test_group_column_is_found_however_it_is_named(
     assert out is not None, f"failed to find a group column named {column_name!r}"
     assert "Group" in out.columns
     assert out["Group"].nunique() == 5
+
+
+@pytest.mark.parametrize(
+    "column_name",
+    [
+        "Group Name",   # what Brightspace's group function exports
+        "Group_Name",
+        "Groups",
+        "Grouping",
+        "Team Name",
+        "Tutorial Group",
+    ],
+)
+def test_nothing_but_those_two_is_picked_automatically(
+    classlist_file, tmp_path, column_name
+):
+    """A sheet carries several columns that read like the group without
+    being it, and the resemblance is the danger. Only what the department
+    actually calls the group is picked for you; anything else has to be
+    named, which is a decision somebody made rather than one guessed at."""
+    path = _classlist_with_group_column(classlist_file, tmp_path, column_name)
+
+    assert import_brightspace_classlist(path, group=True) is None
+
+    # Naming it still works -- only automatic detection is restricted.
+    named = import_brightspace_classlist(
+        path, group=True, group_column=column_name
+    )
+    assert named is not None and named["Group"].nunique() == 5
 
 
 def test_an_explicitly_named_group_column_is_honoured(classlist_file, tmp_path):
@@ -211,7 +239,7 @@ def test_missing_group_column_reports_what_it_looked_for(
 def _classlist_with_groups(classlist_file, tmp_path, groups, name="groups.xlsx"):
     """Write a class list whose first len(groups) rows carry those groups."""
     df = pd.read_excel(classlist_file).head(len(groups)).copy()
-    df["Group Name"] = groups
+    df["Group"] = groups
     out = tmp_path / name
     df.to_excel(out, index=False)
     return out
