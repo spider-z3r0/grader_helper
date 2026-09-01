@@ -256,6 +256,12 @@ Three things worth knowing before you start:
   not recognised, `sheets_distributed` stays unset and the page says which
   folder caused it: a run that matched every student but one has not
   finished. Move the stray folder out and press it again.
+- **Group work needs the groups somewhere.** Tick *submitted by groups* on
+  an assessment and the whole team goes to one grader. Where Brightspace
+  manages the groups its class list export already carries them; where you
+  keep the membership yourself, put the spreadsheet in the module folder and
+  name it as `groups` under `[paths]`. Its folders are never renamed, and the
+  group's mark reaches every member when the marks are collected.
 - **Steps 6 and 8 need two files the department and SI issue.** Put them in
   the module folder and name them in `module.toml`:
 

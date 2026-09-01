@@ -21,6 +21,12 @@ from .models import (
 # ingesting
 from .ingesting.load_graders import load_graders
 from .ingesting.import_brightspace_classlist import import_brightspace_classlist
+from .ingesting.group_membership import (
+    attach_groups,
+    group_key,
+    load_group_membership,
+    spread_group_marks,
+)
 from .ingesting.ingest_completed_graderfiles import (
     Collation,
     ingest_completed_graderfiles,
@@ -113,6 +119,10 @@ __all__ = [
     "distribute_feedback_sheets_groups",
     "assign_graders_individual",
     "assign_graders_groups",
+    "attach_groups",
+    "group_key",
+    "load_group_membership",
+    "spread_group_marks",
     "import_brightspace_classlist",
     "alphabetise_folders",
     "Allocation",
