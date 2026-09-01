@@ -249,10 +249,13 @@ Email, End-of-Line Indicator`. `Username` carries a leading `#`
 Config the author writes, plus state the tool writes. Two rules keep a save
 from damaging a hand-edited file — both discovered by watching it break:
 
-1. **Only keys already in the file are updated.** Appending a key or
-   sub-table places it after that table's trailing comment, and tomlkit
-   binds trailing comments to the *preceding* table — so a comment
+1. **Only keys already in the file are updated** — by `save`. Appending a
+   key or sub-table places it after that table's trailing comment, and
+   tomlkit binds trailing comments to the *preceding* table, so a comment
    introducing the next section silently migrates into the previous one.
+   `set_assessment` and `set_paths` *can* add a key, by inserting above that
+   trivia rather than after it — see **Where the group sheets are**. `save`
+   itself stays conservative.
 2. **`[status.<id>]` lives in its own section**, appended at the end of the
    document where there is nothing to displace. `[module]`, `[paths]` and
    `[[assessment]]` are the author's and are only read or updated in place.
@@ -281,7 +284,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 678 tests on Linux and 679 with a real Excel:
+Done, 693 tests on Linux and 694 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -1805,6 +1808,68 @@ class list, which is the first item above; the fix was that one, not a
 second button. `blocking` gained one reason of its own -- a leader-managed
 group assessment with no sheets folder now says so up front rather than
 failing inside the step.
+
+#### Where the group sheets are, and recording the answer
+
+`group_sheets` defaulted to a folder called `groups/` and the model treated
+it as one -- `init_module` created it, and the page listed what was in it.
+A leader who keeps every team in one workbook is at least as common as one
+who keeps a file per team, and `collect_group_membership` always read
+either. So a real module with `Assignment 1/groups.xlsx` beside it got
+*"0 sheet(s) in `groups/`"* about a file sitting right there.
+
+`group_sheets` now names **a file or a folder**, decided by
+`group_sheets_is_file` -- **by the suffix, not by what is on disk**. It has
+to answer before the file exists, because `directories` uses it to decide
+what `init_module` creates, and creating a *directory* called `groups.xlsx`
+over the top of the leader's workbook name is a mess to undo.
+
+That was the smaller half. The bigger one: the module had no `group_sheets`
+key **at all**, and `save` will not add one.
+
+##### Adding a key the file has not got
+
+`save` updates keys already present and never adds one, because appending
+puts the key *after* the table's trailing trivia and tomlkit binds that to
+the table it follows:
+
+```toml
+[[assessment]]
+id = "Assignment 1"
+
+# ---------------------------------------------------------------------------
+# Where things live, relative to this file.
+# ---------------------------------------------------------------------------
+group_sheets = "groups.xlsx"     <- appended here
+[paths]
+```
+
+The comment now reads as part of the assessment and the new key is orphaned
+below it. Reproduced in four lines of tomlkit before anything was built on
+it.
+
+That is a good default and a bad limit: **a form that cannot record its
+answer asks the same question every time**. `add_key` inserts *above* the
+trailing trivia instead -- walk back over the body entries that have no key
+of their own, which is exactly the whitespace and comments, and insert
+there. `ModuleFile.set_assessment(id, **keys)` and `set_paths(**keys)` are
+the explicit "I mean to add this" calls; `save` stays conservative, because
+most saves are not adding anything and should not be able to.
+
+Two details that are not decoration. The insert goes **through the model**
+first, so `module.toml` cannot be given something the model would not load
+back -- and a value it rejects leaves the file untouched. And when nothing
+trails the last key, `at == len(body)` and tomlkit's `_insert_at` refuses an
+index past the end, so that case appends, which is both correct and the only
+thing available. The second was found by a test, not by reading.
+
+##### On the page
+
+The Groups panel has a file picker, and **picked wins over remembered**, for
+the same reason it does for the class list. `Remember this in module.toml`
+writes `group_sheets` relative to the assessment's own folder. The class
+list's remember now goes through `set_paths`, so it adds the key too --
+last time round it could only refuse and name the line to type.
 
 #### "folders there: 0" meant four different things
 

@@ -128,6 +128,7 @@ def build_group_membership(
     assessment: Assessment,
     *,
     save: bool = True,
+    source: pl.Path | None = None,
     id_column: str | None = None,
     group_column: "str | Sequence[str] | None" = None,
 ) -> GroupMembership:
@@ -144,6 +145,9 @@ def build_group_membership(
         A bound assessment with ``group_source = "module_leader"``.
     save : bool
         Also write ``group_membership.csv`` into ``grading_output/``.
+    source : pathlib.Path, optional
+        Where the sheets are, overriding ``group_sheets``. A folder of them
+        or one file holding the lot. For trying a file before recording it.
     id_column, group_column : str or sequence of str, optional
         Passed through to :func:`collect_group_membership` for sheets whose
         columns are named unusually. ``group_column`` defaults to the
@@ -177,7 +181,7 @@ def build_group_membership(
             "class list, via import_brightspace_classlist(group=True)."
         )
 
-    sheets = assessment.group_sheets_path
+    sheets = source if source is not None else assessment.group_sheets_path
     assert sheets is not None  # guaranteed by the check above
     frame = collect_group_membership(
         sheets,

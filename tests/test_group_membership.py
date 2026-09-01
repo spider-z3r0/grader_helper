@@ -545,3 +545,41 @@ def test_a_composed_key_with_a_blank_part_is_no_group_at_all(tmp_path):
     )
     with pytest.raises(MissingGroupError, match="12345679"):
         attach_group_membership(class_list, membership)
+
+
+# ---------------------------------------------------------------------------
+# One file rather than a folder of them
+# ---------------------------------------------------------------------------
+#
+# `group_sheets` defaults to a folder called `groups/`, and a leader who
+# keeps every team in one workbook is at least as common as one who keeps a
+# file per team. The reader always took either; the model did not.
+
+
+def test_group_sheets_can_name_one_file(bound, tmp_path):
+    a = bound(group=True, group_source="module_leader", group_sheets="groups.xlsx")
+
+    assert a.group_sheets_path == tmp_path / "cw1" / "groups.xlsx"
+    assert a.group_sheets_is_file
+
+
+def test_a_folder_of_sheets_is_still_a_folder(bound, tmp_path):
+    a = bound(group=True, group_source="module_leader")
+
+    assert a.group_sheets_path == tmp_path / "cw1" / "groups"
+    assert not a.group_sheets_is_file
+
+
+def test_no_folder_is_created_over_a_file_name(bound):
+    """init_module creates what `directories` lists. A *directory* called
+    groups.xlsx, sitting where the leader's workbook goes, is a mess to
+    undo."""
+    a = bound(group=True, group_source="module_leader", group_sheets="groups.xlsx")
+
+    assert a.group_sheets_path not in a.directories
+
+
+def test_a_folder_of_sheets_is_still_created(bound):
+    a = bound(group=True, group_source="module_leader")
+
+    assert a.group_sheets_path in a.directories

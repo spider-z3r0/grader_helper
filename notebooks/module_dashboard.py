@@ -1057,30 +1057,33 @@ def the_steps(found):
                 "stores paths relative to itself, so the class list has to "
                 "live in the module folder. Copy it in and pick it again."
             )
-        handle = found.file
-        # `save` updates keys already in the file and does not add new ones --
-        # appending to a table moves the comment that follows it. So say
-        # plainly when there is nothing to update, rather than reporting a
-        # save that changed nothing.
-        if "classlist" not in (handle.document.get("paths") or {}):
-            raise ValueError(
-                "module.toml has no `classlist` line under `[paths]` to "
-                "update, and saving will not add one -- appending a key moves "
-                "the comment that follows the table. Add this line by hand "
-                f'under [paths]:\n\n    classlist = "{relative.as_posix()}"'
-            )
-        handle.module.paths.classlist = relative.as_posix()
-        handle.save()
+        # set_paths adds the key when the file has not got it, above the
+        # table's trailing comments rather than after them -- see add_key.
+        found.file.set_paths(classlist=relative.as_posix())
         return relative
 
-    def collect_groups(assessment, class_list=None):
+    def remember_group_sheets(assessment, path):
+        """Record where an assessment's group sheets are, in module.toml."""
+        try:
+            relative = pl.Path(path).relative_to(assessment.folder_path)
+        except ValueError:
+            raise ValueError(
+                f"{path} is outside `{assessment.folder_path}`. "
+                "`group_sheets` is relative to the assessment's own folder, "
+                "and module.toml stores nothing absolute, so the sheets have "
+                "to live in there. Copy them in and pick again."
+            )
+        found.file.set_assessment(assessment.id, group_sheets=relative.as_posix())
+        return relative
+
+    def collect_groups(assessment, class_list=None, source=None):
         """Collect a leader-managed assessment's own group sheets.
 
         Allocation does this too. Running it on its own first is where a
         mistyped id or a student left off every sheet shows up, and both are
         much cheaper to fix before the graders have workbooks.
         """
-        membership = build_group_membership(assessment)
+        membership = build_group_membership(assessment, source=source)
         # The join is where a student in no group is named, so do it here
         # rather than leaving it to be found at allocation.
         attached = (
@@ -1186,6 +1189,7 @@ def the_steps(found):
     return (
         allocate_marking,
         collect_groups,
+        remember_group_sheets,
         remember_class_list,
         collect_marks,
         recorded,
@@ -1197,13 +1201,71 @@ def the_steps(found):
 
 
 @app.cell
-def groups_panel(chosen, class_list, loaded):
+def groups_source(chosen, loaded):
+    # module.toml names where the group sheets are, and the default is a
+    # folder called `groups/`. Plenty of leaders keep the lot in one file
+    # instead, and a module written before this key existed has not got it
+    # at all -- so it can be pointed at here, and remembered.
+    groups_picker = mo.ui.file_browser(
+        initial_path=(
+            chosen.folder_path
+            if chosen is not None and chosen.folder_path.is_dir()
+            else pl.Path.home()
+        ),
+        selection_mode="file",
+        multiple=False,
+        filetypes=[".csv", ".xlsx", ".xlsm"],
+        label="**Group sheets** — pick the file holding them",
+    )
+    remember_groups = mo.ui.run_button(
+        label="Remember this in module.toml"
+    )
+
+    (
+        mo.vstack([groups_picker, remember_groups])
+        if loaded and chosen is not None and chosen.group
+        and chosen.group_source is GroupSource.MODULE_LEADER
+        else mo.md("")
+    )
+    return groups_picker, remember_groups
+
+
+@app.cell
+def groups_panel(chosen, class_list, loaded, groups_picker):
     # A group assessment's membership has to exist before anything can be
     # allocated, and where it comes from depends on which kind it is. This is
     # the only step whose *presence* depends on the assessment: an individual
     # one has no groups to collect, and showing a dead button for it would
     # say there is something to do.
     catch_groups = mo.ui.run_button(label="Collect the groups", kind="warn")
+
+    def _picked():
+        picked = groups_picker.value
+        return pl.Path(picked[0].path) if picked else None
+
+    def groups_where(assessment):
+        """The sheets to read: picked here, or what module.toml says.
+
+        **Picked wins**, for the same reason it does for the class list: the
+        remembered value being wrong or absent is the reason the control is
+        there.
+        """
+        picked = _picked()
+        if picked is not None:
+            return picked, "picked here"
+        return assessment.group_sheets_path, "from module.toml"
+
+    def _sheets_note(where):
+        if where.is_file():
+            return f"one file, `{where.name}`"
+        if not where.is_dir():
+            return None
+        names = sorted(
+            q.name for q in where.iterdir()
+            if q.suffix.lower() in (".csv", ".xlsx", ".xlsm")
+            and not q.name.startswith("~$")
+        )
+        return f"**{len(names)} sheet(s)** in `{where.name}/` — `{names}`" if names else None
 
     def _panel():
         if chosen is None or not chosen.group:
@@ -1224,26 +1286,22 @@ def groups_panel(chosen, class_list, loaded):
                 )
             )
 
-        sheets = chosen.group_sheets_path
-        if sheets is None or not sheets.is_dir():
+        where, source = groups_where(chosen)
+        note = _sheets_note(where) if where is not None else None
+        if note is None:
             return mo.md(
-                f"### Groups\n\n*Not yet — no group sheets folder at "
-                f"`{sheets}`.* Put one sheet per team in there, named for the "
-                "team, or one workbook with a tab per team."
+                "### Groups\n\n"
+                f"*Nothing to collect at* `{where}` *({source}).* "
+                "Pick the file above — a folder of one sheet per team works "
+                "too, and is set with `group_sheets` in module.toml."
             )
 
-        found_sheets = sorted(
-            p.name for p in sheets.iterdir()
-            if p.suffix.lower() in (".csv", ".xlsx", ".xlsm")
-            and not p.name.startswith("~$")
-        )
         return mo.vstack([
             mo.md(
                 "### Groups\n\n"
                 "You keep these groups yourself, so they have to be collected "
-                f"into one student-to-group table before anything can be "
-                f"allocated. In `{sheets.name}/`: "
-                f"**{len(found_sheets)} sheet(s)** — `{found_sheets}`.\n\n"
+                "into one student-to-group table before anything can be "
+                f"allocated. Reading {note} *({source})*.\n\n"
                 "Allocating does this too. Running it here first is where a "
                 "mistyped id or a student left off every sheet shows up, and "
                 "both are much cheaper to fix before the graders have "
@@ -1253,15 +1311,21 @@ def groups_panel(chosen, class_list, loaded):
         ])
 
     _panel() if loaded else mo.md("")
-    return (catch_groups,)
+    return catch_groups, groups_where
 
 
 @app.cell
-def do_catch_groups(catch_groups, collect_groups, chosen, class_list, attempt, failed):
+def do_catch_groups(
+    catch_groups, collect_groups, groups_where, chosen, class_list, attempt,
+    failed,
+):
     if not (catch_groups.value and chosen is not None and chosen.group):
         caught_groups = mo.md("")
     else:
-        _done, _error = attempt(lambda: collect_groups(chosen, class_list))
+        _source, _ = groups_where(chosen)
+        _done, _error = attempt(
+            lambda: collect_groups(chosen, class_list, source=_source)
+        )
         if _error is not None:
             caught_groups = failed("Collecting the groups", _error)
         else:
@@ -1288,6 +1352,35 @@ def do_catch_groups(catch_groups, collect_groups, chosen, class_list, attempt, f
             ])
 
     caught_groups
+    return
+
+
+@app.cell
+def do_remember_groups(
+    remember_groups, remember_group_sheets, groups_where, chosen, attempt,
+    failed,
+):
+    if not (remember_groups.value and chosen is not None and chosen.group):
+        remembered_groups = mo.md("")
+    else:
+        _source, _ = groups_where(chosen)
+        _done, _error = attempt(
+            lambda: remember_group_sheets(chosen, _source)
+        )
+        if _error is not None:
+            remembered_groups = failed("Remembering the group sheets", _error)
+        else:
+            remembered_groups = mo.md(
+                f"""
+                ### Remembered
+
+                `group_sheets = "{_done.as_posix()}"` is now on
+                `{chosen.id}` in module.toml. Click **Re-read this folder**
+                at the top to see it.
+                """
+            )
+
+    remembered_groups
     return
 
 

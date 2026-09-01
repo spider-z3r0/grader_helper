@@ -161,8 +161,10 @@ class Assessment(BaseModel):
     )
     group_sheets: str = Field(
         default="groups",
-        description="Folder of the module leader's own group sheets, relative "
-        "to `folder`. Only read for group_source = 'module_leader'.",
+        description="Where the module leader's own group sheets are, relative "
+        "to `folder`: a folder of them, or one file holding the lot. A name "
+        "with a suffix is taken to be a file. Only read for "
+        "group_source = 'module_leader'.",
     )
     group_column: str | list[str] | None = Field(
         default=None,
@@ -403,14 +405,30 @@ class Assessment(BaseModel):
     def group_sheets_path(self) -> pl.Path | None:
         """The leader's own group sheets, or None where there are none.
 
+        A folder of sheets or a single file, whichever ``group_sheets``
+        names -- ``collect_group_membership`` reads either, and a leader who
+        keeps every team in one workbook is at least as common as one who
+        keeps a file per team.
+
         ``None`` unless ``group_source = "module_leader"``: a
         Brightspace-managed group assessment reads its membership from the
-        class list, so a folder for group sheets would be a folder nothing
-        ever puts anything in.
+        class list, so a place to put group sheets would be a place nothing
+        ever puts anything.
         """
         if self.group_source is not GroupSource.MODULE_LEADER:
             return None
         return self.folder_path / self.group_sheets
+
+    @property
+    def group_sheets_is_file(self) -> bool:
+        """Whether ``group_sheets`` names one file rather than a folder.
+
+        By its suffix, not by what is on disk: this has to answer before the
+        file exists, because ``init_module`` uses it to decide what to
+        create, and creating a *directory* called ``groups.xlsx`` is a mess
+        to undo.
+        """
+        return bool(pl.PurePath(self.group_sheets).suffix)
 
     @property
     def group_membership_path(self) -> pl.Path | None:
@@ -429,7 +447,10 @@ class Assessment(BaseModel):
         """Every directory this assessment needs, for init_module to create."""
         wanted = [self.folder_path, self.submissions_path, self.grading_output_path]
         sheets = self.group_sheets_path
-        if sheets is not None:
+        # A folder to put the sheets in, yes. A folder *named* groups.xlsx,
+        # no -- that is a file the leader already has, and creating a
+        # directory over the top of its name is a mess to undo.
+        if sheets is not None and not self.group_sheets_is_file:
             wanted.append(sheets)
         return tuple(wanted)
 

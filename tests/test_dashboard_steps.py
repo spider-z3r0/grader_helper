@@ -490,12 +490,12 @@ def test_a_class_list_outside_the_module_folder_is_refused(
         names["remember_class_list"](stray)
 
 
-def test_a_module_file_with_no_classlist_line_says_to_add_one(
+def test_a_classlist_line_is_added_when_the_file_has_none(
     module_on_disk, dashboard
 ):
-    """`save` updates keys already in the file and does not add new ones --
-    appending to a table moves the comment that follows it. A save that
-    silently changed nothing would be worse than a refusal."""
+    """A form that cannot record its answer asks the same question every
+    time. The key goes in above the table's trailing comments, so the
+    comment introducing the next section stays with it."""
     toml = module_on_disk / "module.toml"
     text = toml.read_text(encoding="utf-8")
     import re
@@ -503,8 +503,14 @@ def test_a_module_file_with_no_classlist_line_says_to_add_one(
     toml.write_text(re.sub(r'classlist = "[^"]*"\n', "", text), encoding="utf-8")
     names = dashboard(module_on_disk)
 
-    with pytest.raises(ValueError, match="by hand"):
-        names["remember_class_list"](module_on_disk / "classlist.xlsx")
+    names["remember_class_list"](module_on_disk / "classlist.xlsx")
+
+    after = toml.read_text(encoding="utf-8")
+    assert 'classlist = "classlist.xlsx"' in after
+    assert ModuleFile.load(module_on_disk).module.classlist_path.exists()
+    for line in text.splitlines():
+        if line.startswith("#"):
+            assert line in after, f"comment lost: {line}"
 
 
 # ---------------------------------------------------------------------------
@@ -708,3 +714,97 @@ def test_a_folder_with_no_student_folders_blocks_distribution(
 
     assert reasons and "no student folders" in reasons[0]
     assert "there is no submissions folder" not in reasons[0]
+
+
+# ---------------------------------------------------------------------------
+# Group sheets kept in one file
+# ---------------------------------------------------------------------------
+#
+# `group_sheets` defaults to a folder called `groups/`, and a module written
+# before that key existed has not got it at all -- so the page looked in an
+# empty folder and said there were no sheets, about an assessment whose
+# sheets were sitting in one file beside it.
+
+
+@pytest.fixture
+def one_groups_file(leader_managed_module):
+    """The same groups, as one workbook at the assessment root."""
+    import pandas as pd
+
+    root = leader_managed_module
+    cw1_folder = root / "assessments" / "cw1"
+    ids = pd.read_excel(root / "classlist.xlsx", dtype=str)["Username"]
+    ids = [str(i).replace("#", "") for i in ids]
+    half = len(ids) // 2
+    pd.DataFrame(
+        {
+            "Student Id": ids,
+            "Group": ["Team 1"] * half + ["Team 2"] * (len(ids) - half),
+        }
+    ).to_excel(cw1_folder / "groups.xlsx", index=False)
+
+    for sheet in (cw1_folder / "groups").iterdir():
+        sheet.unlink()
+    (cw1_folder / "groups").rmdir()
+    return root
+
+
+def test_groups_can_be_collected_from_one_file(one_groups_file, dashboard):
+    names = dashboard(one_groups_file)
+    cw1 = names["found"].module.assessment("cw1")
+    groups_file = one_groups_file / "assessments" / "cw1" / "groups.xlsx"
+
+    membership, attached = names["collect_groups"](
+        cw1, names["class_list"], source=groups_file
+    )
+
+    assert membership.frame["Group"].nunique() == 2
+    assert attached is not None
+
+
+def test_where_the_sheets_are_can_be_remembered(one_groups_file, dashboard):
+    """A form that cannot record its answer asks the same question every
+    time -- and this key was not in the file to be updated in place."""
+    names = dashboard(one_groups_file)
+    cw1 = names["found"].module.assessment("cw1")
+    groups_file = one_groups_file / "assessments" / "cw1" / "groups.xlsx"
+
+    written = names["remember_group_sheets"](cw1, groups_file)
+
+    assert written == pl.Path("groups.xlsx")
+    reloaded = ModuleFile.load(one_groups_file).module.assessment("cw1")
+    assert reloaded.group_sheets == "groups.xlsx"
+    assert reloaded.group_sheets_path.is_file()
+
+
+def test_group_sheets_outside_the_assessment_folder_are_refused(
+    one_groups_file, dashboard, tmp_path
+):
+    """`group_sheets` is relative to the assessment's own folder, and
+    module.toml stores nothing absolute."""
+    names = dashboard(one_groups_file)
+    cw1 = names["found"].module.assessment("cw1")
+    stray = tmp_path / "groups.xlsx"
+    stray.write_bytes(b"")
+
+    with pytest.raises(ValueError, match="outside"):
+        names["remember_group_sheets"](cw1, stray)
+
+
+def test_a_remembered_groups_file_then_collects_on_its_own(
+    one_groups_file, dashboard
+):
+    """End of the path: recorded, re-read off the disk, collected with no
+    source given."""
+    names = dashboard(one_groups_file)
+    cw1 = names["found"].module.assessment("cw1")
+    names["remember_group_sheets"](
+        cw1, one_groups_file / "assessments" / "cw1" / "groups.xlsx"
+    )
+
+    again = dashboard(one_groups_file)
+    membership, _ = again["collect_groups"](
+        again["found"].module.assessment("cw1"), again["class_list"]
+    )
+
+    assert membership.frame["Group"].nunique() == 2

@@ -267,3 +267,123 @@ def test_a_failed_write_leaves_the_original_intact(module_dir, monkeypatch):
 
     assert (module_dir / MODULE_FILENAME).read_text(encoding="utf-8") == original
     assert [p.name for p in module_dir.iterdir()] == [MODULE_FILENAME]
+
+
+# ---------------------------------------------------------------------------
+# Adding a key the file has not got
+# ---------------------------------------------------------------------------
+#
+# `save` never adds a key, because appending one puts it after the table's
+# trailing comments and tomlkit binds those to the table they follow -- so a
+# comment introducing the next section ends up reading as part of this one.
+# That is a good default and a bad limit: a form that cannot record its
+# answer asks the same question every time.
+
+
+HAS_A_TRAILING_COMMENT = '''\
+schema_version = 1
+
+[module]
+code = "PS4034"
+name = "Advanced Empirical Psychology"
+year = "2026/27"
+leader = "KOM"
+
+[[assessment]]
+id = "Assignment 1"
+type = "coursework"
+name = "Assignment 1"
+marks_out_of = 100
+weight = 100
+group = true
+group_source = "module_leader"
+
+# ---------------------------------------------------------------------------
+# Where things live, relative to this file.
+# ---------------------------------------------------------------------------
+[paths]
+assessments = "Assessments"
+'''
+
+
+@pytest.fixture
+def commented_module(tmp_path):
+    (tmp_path / MODULE_FILENAME).write_text(HAS_A_TRAILING_COMMENT, encoding="utf-8")
+    return tmp_path
+
+
+def test_a_key_can_be_added_to_an_assessment(commented_module):
+    ModuleFile.load(commented_module).set_assessment(
+        "Assignment 1", group_sheets="groups.xlsx"
+    )
+
+    assert load_module(commented_module).assessment(
+        "Assignment 1"
+    ).group_sheets == "groups.xlsx"
+
+
+def test_the_added_key_goes_above_the_trailing_comment(commented_module):
+    """Appended, it lands *after* the comment that introduces [paths] --
+    which then reads as part of the assessment, with the new key orphaned
+    below it."""
+    ModuleFile.load(commented_module).set_assessment(
+        "Assignment 1", group_sheets="groups.xlsx"
+    )
+
+    lines = (commented_module / MODULE_FILENAME).read_text(
+        encoding="utf-8"
+    ).splitlines()
+    added = lines.index('group_sheets = "groups.xlsx"')
+    comment = next(i for i, line in enumerate(lines) if "Where things live" in line)
+    paths = lines.index("[paths]")
+
+    assert added < comment < paths
+
+
+def test_every_comment_survives_adding_a_key(commented_module):
+    before = (commented_module / MODULE_FILENAME).read_text(encoding="utf-8")
+
+    ModuleFile.load(commented_module).set_assessment(
+        "Assignment 1", group_column=["Grp Code", "Team"]
+    )
+
+    after = (commented_module / MODULE_FILENAME).read_text(encoding="utf-8")
+    for line in before.splitlines():
+        if line.startswith("#"):
+            assert line in after, f"comment lost: {line}"
+
+
+def test_a_key_already_there_is_updated_not_duplicated(commented_module):
+    ModuleFile.load(commented_module).set_assessment(
+        "Assignment 1", group_source="brightspace"
+    )
+
+    text = (commented_module / MODULE_FILENAME).read_text(encoding="utf-8")
+    assert text.count("group_source = ") == 1
+    assert 'group_source = "brightspace"' in text
+
+
+def test_a_path_can_be_added(commented_module):
+    ModuleFile.load(commented_module).set_paths(classlist="classlist.csv")
+
+    text = (commented_module / MODULE_FILENAME).read_text(encoding="utf-8")
+    assert 'classlist = "classlist.csv"' in text
+    assert load_module(commented_module).paths.classlist == "classlist.csv"
+
+
+def test_an_unknown_assessment_is_refused(commented_module):
+    with pytest.raises(KeyError):
+        ModuleFile.load(commented_module).set_assessment("nope", group_sheets="g.xlsx")
+
+
+def test_a_bad_value_is_refused_before_anything_is_written(commented_module):
+    """It goes through the model, so module.toml cannot be given something
+    the model would not load."""
+    before = (commented_module / MODULE_FILENAME).read_text(encoding="utf-8")
+
+    with pytest.raises(Exception):
+        ModuleFile.load(commented_module).set_assessment(
+            "Assignment 1", marks_out_of=-5
+        )
+
+    assert (commented_module / MODULE_FILENAME).read_text(encoding="utf-8") == before

@@ -96,6 +96,9 @@ where a session about it starts.
   mark per team) and leader-managed (groups in the leader's own sheets, the
   ordinary per-student download). `group = true` without `group_source`
   refuses to load. See **Group assessments**.
+- **`module.toml` keys: `save` never adds one, `set_assessment` /
+  `set_paths` do.** Appending puts a key after the table's trailing comment,
+  which tomlkit then binds to the wrong table. `add_key` inserts above it.
 - **Which column is the group is decided by the data, not the name.** A
   leader's sheet often has `Team`, `Grp Code` and `Group` all at once, and
   they are different partitions. `resolve_group_column` refuses when

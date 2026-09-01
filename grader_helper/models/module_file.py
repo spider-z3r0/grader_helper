@@ -43,7 +43,7 @@ import tempfile
 from typing import Any
 
 import tomlkit
-from tomlkit.items import AoT, Table
+from tomlkit.items import AoT, SingleKey, Table
 
 from .module import SCHEMA_VERSION, Module
 from .people import Person, as_person
@@ -169,6 +169,76 @@ class ModuleFile:
         if satisfied:
             setattr(self.module.status, flag, True)
             self.save()
+        return self
+
+    def set_assessment(self, assessment_id: str, **keys) -> "ModuleFile":
+        """Record configuration on one assessment and save.
+
+        Unlike `save`, this **adds** the keys when the file has not got them,
+        which is what lets the app answer a question once instead of every
+        time -- where the group sheets are, which column is the group. See
+        :func:`add_key` for why appending is not enough.
+
+        Args:
+        assessment_id (str): Which assessment.
+        **keys: Field names and values, validated against `Assessment`.
+
+        Returns:
+        ModuleFile: self, saved.
+
+        Raises:
+        KeyError: If there is no such assessment, in the model or the file.
+
+        Example:
+            >>> handle.set_assessment("cw1", group_sheets="groups.xlsx")
+        """
+        assessment = self.module.assessment(assessment_id)
+        for name, value in keys.items():
+            setattr(assessment, name, value)
+
+        table = next(
+            (
+                t for t in _assessment_tables(self.document)
+                if t.get("id") == assessment_id
+            ),
+            None,
+        )
+        if table is None:
+            raise KeyError(
+                f"No [[assessment]] with id {assessment_id!r} in "
+                f"{self.path}. The model and the file disagree, which is not "
+                "something to fix by writing a new block."
+            )
+        for name, value in keys.items():
+            add_key(table, name, getattr(assessment, name))
+
+        self.save()
+        return self
+
+    def set_paths(self, **keys: str) -> "ModuleFile":
+        """Record where something lives in `[paths]`, and save.
+
+        Adds the key when the file has not got it -- see
+        :meth:`set_assessment`.
+
+        Raises:
+        KeyError: If the file has no `[paths]` table. Which one a module has
+            is the author's to declare, and inventing the table would put it
+            wherever the writer happened to be.
+        """
+        for name, value in keys.items():
+            setattr(self.module.paths, name, value)
+
+        table = self.document.get("paths")
+        if table is None:
+            raise KeyError(
+                f"{self.path} has no [paths] table to record in. Add one, "
+                "even empty, and this can fill it in."
+            )
+        for name, value in keys.items():
+            add_key(table, name, value)
+
+        self.save()
         return self
 
     def set_status(self, assessment_id: str, **flags: bool) -> "ModuleFile":
@@ -310,6 +380,49 @@ def _assessment_tables(document: Any) -> list:
     return list(aot) if isinstance(aot, (AoT, list)) else []
 
 
+def add_key(table: Any, key: str, value: Any) -> None:
+    """Set a key on a table, above its trailing blank lines and comments.
+
+    Appending puts it *after* them, and tomlkit binds trailing trivia to the
+    table it follows -- so a comment introducing the next section ends up
+    reading as part of this one, with the new key orphaned below it::
+
+        [[assessment]]
+        id = "Assignment 1"
+
+        # -------------------------------------------------------------
+        # Where things live, relative to this file.
+        # -------------------------------------------------------------
+        group_sheets = "groups.xlsx"     <- appended here
+        [paths]
+
+That is the hazard `save` avoids by never adding a key at all. It is worth
+avoiding rather than never adding, because a form that cannot record its
+answer is a form that asks the same question every time.
+
+The insertion point is the index after the last real key, found by walking
+back over the entries with no key of their own -- which is exactly the
+trailing whitespace and comments.
+    """
+    if key in table:
+        table[key] = value
+        return
+
+    container = table.value
+    body = container.body
+    at = len(body)
+    while at > 0 and body[at - 1][0] is None:
+        at -= 1
+
+    if at >= len(body):
+        # Nothing trails the last key, so there is nothing to get in front
+        # of. Appending is both correct and the only thing tomlkit will do:
+        # _insert_at refuses an index past the end of the body.
+        table[key] = value
+        return
+    container._insert_at(at, SingleKey(key), tomlkit.item(value))
+
+
 def _sync_aot(doc_node: Any, key: str, rows: list[dict]) -> None:
     existing = doc_node.get(key)
 
@@ -436,7 +549,8 @@ _ASSESSMENT_PREAMBLE = """
 #
 #   group = true
 #   group_source = "module_leader"   the groups are yours, kept in sheets of
-#                                    your own under <folder>/groups/. The
+#                                    your own -- a folder of them, or one
+#                                    file, named by group_sheets. The
 #                                    download is the ordinary individual
 #                                    shape -- one folder and one feedback
 #                                    sheet per student -- so marks may
@@ -465,7 +579,9 @@ _ASSESSMENT_PREAMBLE = """
 #   <folder>/                  the rubric, and distributed.xlsx once allocated
 #     submissions/             the unzipped Brightspace download
 #     groups/                  your own group sheets, for group_source =
-#                              "module_leader" only
+#                              "module_leader" only. group_sheets names this;
+#                              a name with a suffix -- groups.xlsx -- is one
+#                              file rather than a folder of them
 #     grading_output/          grader workbooks, completed_grades.xlsx, and
 #                              the collected group_membership.csv
 #
