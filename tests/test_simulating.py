@@ -677,3 +677,67 @@ def test_without_a_blank_any_number_still_counts(ready_to_mark):
 
     assert not result.sheets
     assert result.skipped
+
+
+# ---------------------------------------------------------------------------
+# Saying what it sees
+# ---------------------------------------------------------------------------
+#
+# Four separate guesses about why a real module's sheets were not being
+# marked all turned out to be about what was IN the grade cell -- which
+# nobody can see from here and everybody can see from there.
+
+
+def test_explain_lists_every_sheet_and_its_decision(cw1):
+    from grader_helper.simulating import explain_sheets
+
+    frame = explain_sheets(cw1.submissions_path, cw1.grade_cell, cw1.rubric_path)
+
+    assert len(frame) == sum(len(p) for p in feedback_sheets(cw1).values())
+    assert set(frame["decision"]) == {"write"}
+    assert list(frame.columns) == [
+        "identifier", "sheet", "folder", "value", "blank", "decision"
+    ]
+
+
+def test_explain_shows_why_a_sheet_would_be_skipped(ready_to_mark):
+    from grader_helper.simulating import explain_sheets
+
+    cw1 = ready_to_mark.assessment("cw1")
+    marked = next(iter(feedback_sheets(cw1).values()))[0]
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(marked)
+    workbook.worksheets[0][cw1.grade_cell] = 63.0
+    workbook.save(marked)
+
+    frame = explain_sheets(cw1.submissions_path, cw1.grade_cell, cw1.rubric_path)
+    row = frame.loc[frame["sheet"] == marked.name].iloc[0]
+
+    assert row["value"] == 63.0
+    assert "already marked" in row["decision"]
+
+
+def test_explain_says_nothing_found_rather_than_raising(tmp_path):
+    """It is a diagnostic. Refusing to run is the opposite of its job."""
+    from grader_helper.simulating import explain_sheets
+
+    empty = tmp_path / "submissions"
+    empty.mkdir()
+
+    assert explain_sheets(empty, "D30").empty
+
+
+def test_a_macro_enabled_sheet_is_found(cw1):
+    """catch_grades reads .xlsm, .xlsb and .xls as well. A rubric saved as
+    one was findable by the reader and invisible to the writer."""
+    import shutil
+
+    original = next(iter(feedback_sheets(cw1).values()))[0]
+    macro = original.with_suffix(".xlsm")
+    shutil.copy2(original, macro)
+    original.unlink()
+
+    found = feedback_sheets(cw1)
+
+    assert macro in [p for paths in found.values() for p in paths]

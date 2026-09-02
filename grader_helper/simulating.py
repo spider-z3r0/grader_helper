@@ -40,6 +40,7 @@ From a terminal::
 
     uv run simulate-marking ~/scratch/PS4001
     uv run simulate-marking ~/scratch/PS4001 -a cw1 --write
+    uv run simulate-marking ~/scratch/PS4001 -a cw1 --explain
 
 or, for files that are not laid out as a module -- a download and the grader
 workbooks sitting in folders of their own::
@@ -59,6 +60,10 @@ from openpyxl import load_workbook
 
 from .dataframe_operations.make_letter_grade import GRADE_BANDS
 from .models import Assessment, Module, load_module
+
+#: Workbook formats a feedback sheet may be saved in. The same set
+#: `catch_grades` reads, so what can be written can be read back.
+SHEET_SUFFIXES = (".xlsx", ".xlsm", ".xlsb", ".xls")
 
 #: What `distribute_feedback_sheets` names the sheets it copies in. The
 #: identifier after it is a student id, or a group label like "Team 3".
@@ -172,7 +177,12 @@ def feedback_sheets_in(submissions: pl.Path) -> dict[str, list[pl.Path]]:
         )
 
     found: dict[str, list[pl.Path]] = {}
-    for path in sorted(submissions.rglob("*.xlsx")):
+    for path in sorted(submissions.rglob("*")):
+        # The same extensions catch_grades reads. A rubric saved as .xlsm
+        # was findable by the reader and invisible to the writer, which is a
+        # difference nothing should have.
+        if path.suffix.lower() not in SHEET_SUFFIXES:
+            continue
         if path.name.startswith("~$"):
             continue
         identifier = _identifier(path.stem)
@@ -666,6 +676,51 @@ def _fill_grader_workbooks(
 # ---------------------------------------------------------------------------
 
 
+def explain_sheets(
+    submissions: pl.Path, grade_cell: str, blank: pl.Path | None = None
+) -> pd.DataFrame:
+    """What the simulator sees, sheet by sheet, and what it would do.
+
+    Written because four separate guesses about why a real module's sheets
+    were not being marked all turned out to be about what was *in* the grade
+    cell -- which is a thing nobody can see from here and everybody can see
+    from there. One column per question worth asking:
+
+    ``identifier``   who the sheet is named for
+    ``value``        what its grade cell holds now, as `catch_grades` reads it
+    ``blank``        what the blank rubric holds, if there is one
+    ``decision``     ``write`` or ``skip``, and skip says why
+
+    Returns
+    -------
+    pandas DataFrame
+        One row per feedback sheet found. Empty when none were.
+    """
+    blank_value = grade_cell_value(blank, grade_cell) if blank else None
+
+    rows = []
+    for identifier, paths in feedback_sheets_in(submissions).items():
+        for path in paths:
+            value = grade_cell_value(path, grade_cell)
+            marked = _is_a_mark(value, blank_value)
+            rows.append(
+                {
+                    "identifier": identifier,
+                    "sheet": path.name,
+                    "folder": path.parent.name,
+                    "value": value,
+                    "blank": blank_value,
+                    "decision": (
+                        "skip -- already marked" if marked else "write"
+                    ),
+                }
+            )
+    return pd.DataFrame(
+        rows,
+        columns=["identifier", "sheet", "folder", "value", "blank", "decision"],
+    )
+
+
 def _assessments_to_mark(module: Module, wanted: str | None) -> list[Assessment]:
     if wanted is not None:
         return [module.assessment(wanted)]
@@ -704,6 +759,9 @@ def _run_on_folders(args, parser) -> int:
         else None
     )
     print(f"{args.submissions}  (cell {args.cell})")
+    if args.explain:
+        _explain(explain_sheets(args.submissions, args.cell, args.blank))
+        return 0
     if args.workbooks is None:
         print(
             "  no --workbooks: marking the feedback sheets only, so there is "
@@ -732,6 +790,27 @@ def _run_on_folders(args, parser) -> int:
     if not args.write:
         print("\nNothing was written. Pass --write to do it for real.")
     return 0
+
+
+def _explain(frame: pd.DataFrame, limit: int = 12) -> None:
+    """Print what explain_sheets found, without needing pandas to be pretty."""
+    if frame.empty:
+        print(
+            "  No feedback sheets found. They are named "
+            "'Feedback sheet <id>.xlsx' and sit one per student folder."
+        )
+        return
+
+    counts = frame["decision"].value_counts().to_dict()
+    print(f"  {len(frame)} sheet(s): {counts}")
+    for _, row in frame.head(limit).iterrows():
+        print(
+            f"    {row['identifier']:<14} {row['sheet']:<34} "
+            f"cell={row['value']!r:<10} blank={row['blank']!r:<10} "
+            f"{row['decision']}"
+        )
+    if len(frame) > limit:
+        print(f"    ... and {len(frame) - limit} more")
 
 
 def _report(result: SimulatedMarking, label: str = "") -> None:
@@ -816,6 +895,11 @@ def main(argv: "Sequence[str] | None" = None) -> int:
         "--overwrite", action="store_true",
         help="Mark sheets that already carry a number.",
     )
+    parser.add_argument(
+        "--explain", action="store_true",
+        help="List every feedback sheet found, what its grade cell holds, "
+             "and whether it would be written or skipped. Writes nothing.",
+    )
     args = parser.parse_args(argv)
 
     if (args.module is None) == (args.submissions is None):
@@ -830,6 +914,20 @@ def main(argv: "Sequence[str] | None" = None) -> int:
 
     module = load_module(args.module)
     print(f"{module.code} -- {module.name}  ({module.root})")
+
+    if args.explain:
+        for assessment in _assessments_to_mark(module, args.assessment):
+            print(f"\n  {assessment.id}  (grade cell {assessment.grade_cell})")
+            print(f"  submissions: {assessment.submissions_path}")
+            print(f"  blank sheet: {assessment.rubric_path}")
+            _explain(
+                explain_sheets(
+                    assessment.submissions_path,
+                    assessment.grade_cell,
+                    assessment.rubric_path,
+                )
+            )
+        return 0
 
     for assessment in _assessments_to_mark(module, args.assessment):
         try:

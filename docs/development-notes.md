@@ -284,7 +284,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 710 tests on Linux and 711 with a real Excel:
+Done, 714 tests on Linux and 715 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -2029,6 +2029,29 @@ NG, not F), and the halves Python and Excel round in opposite directions.
 `round(64.5)` is 64 and Excel's is 65, and 64 is a B3 where 65 is a B2. A
 cohort with no exact halves in it never tests the rule this project has a
 house note about.
+
+#### `--explain`, because guessing was not working
+
+Four separate guesses about why a real module's sheets were not being
+marked all turned out to be about **what was in the grade cell** -- which
+nobody can see from here and everybody can see from there. So:
+
+```
+uv run simulate-marking <module> -a cw1 --explain
+```
+
+lists every sheet it finds, what its grade cell holds, what the blank rubric
+holds, and whether it would write or skip and why. It writes nothing, and it
+reports an empty folder rather than refusing to run -- refusing is the
+opposite of a diagnostic's job.
+
+`explain_sheets` is a function returning a frame, not printing: the printing
+is the part that cannot be tested, so it does as little as possible.
+
+The same pass widened the sheet glob to `.xlsx`, `.xlsm`, `.xlsb` and
+`.xls` -- the set `catch_grades` already read. A rubric saved as `.xlsm` was
+findable by the reader and invisible to the writer, which is a difference
+nothing should have.
 
 #### "Holds a number" is not "has been marked"
 
