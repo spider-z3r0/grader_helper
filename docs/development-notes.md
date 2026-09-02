@@ -284,7 +284,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 719 tests on Linux and 720 with a real Excel:
+Done, 724 tests on Linux and 725 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -1651,6 +1651,21 @@ luck. Moving the clash to the last grader made it a real test. Worth
 remembering that "reintroduce the bug" catches bad tests, not just bad code.
 
 ### The reconciliation, in code
+
+**A disagreement says whose it was.** The comparison carries `grader` across
+from the collated record, because a row naming a student and two numbers
+leaves the module leader searching five workbooks for that student id to
+find out whose slip it was — and the answer was in the collated file the
+whole time. The merge had been selecting `[Student ID, Mark]` and throwing
+the rest away.
+
+`carry=` takes any columns; the grader is the default, and anything the
+collated file has not got is skipped rather than raising, because a file
+collated before the allocation wrote that column is still a valid record of
+what the department was sent. A column the received frame already has is
+skipped too — merging it comes back as `grade_x` and `grade_y`, and the
+comparison would then be reading one of them without saying which.
+
 
 The process itself is in **The domain → The lifecycle of one assessment**;
 this is what it looks like from the code, which reads as though

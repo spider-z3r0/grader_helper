@@ -119,3 +119,74 @@ def test_ids_read_as_numbers_are_refused_loudly():
 def test_a_missing_column_says_which_one():
     with pytest.raises(KeyError, match="Mark"):
         reconcile_marks(received(a=62), pd.DataFrame({"Student ID": ["a"]}))
+
+
+# ---------------------------------------------------------------------------
+# Who to go and ask
+# ---------------------------------------------------------------------------
+#
+# A disagreement names a student and two numbers. What the module leader does
+# next is open the workbook of whoever mistyped it -- so without the grader
+# they are searching five workbooks for a student id to find out whose slip
+# it was. The answer is in the collated file the whole time.
+
+
+def reported_with_graders(**marks) -> pd.DataFrame:
+    """The collated grader files, which carry the grader on every row."""
+    frame = reported(**{k: v for k, v in marks.items()})
+    frame["grader"] = ["KOM", "SOB", "EMC"][: len(frame)]
+    return frame
+
+
+def test_a_disagreement_says_whose_it_was():
+    result = reconcile_marks(
+        received(a=62, b=71), reported_with_graders(a=62, b=68)
+    )
+
+    row = result.disagreements.iloc[0]
+    assert row["Student ID"] == "b"
+    assert row["grader"] == "SOB"
+
+
+def test_the_grader_is_there_for_every_row_compared():
+    result = reconcile_marks(
+        received(a=62, b=71), reported_with_graders(a=62, b=71)
+    )
+
+    assert "grader" in result.comparison.columns
+    assert result.comparison["grader"].tolist() == ["KOM", "SOB"]
+
+
+def test_a_collated_file_without_a_grader_column_still_reconciles():
+    """A file collated before the allocation wrote that column is still a
+    valid record of what the department was sent."""
+    result = reconcile_marks(received(a=62, b=71), reported(a=62, b=68))
+
+    assert not result.agree
+    assert "grader" not in result.comparison.columns
+
+
+def test_other_columns_can_be_carried_too():
+    frame = reported_with_graders(a=62, b=68)
+    frame["Last Name"] = ["Angood", "Barry"]
+
+    result = reconcile_marks(
+        received(a=62, b=71), frame, carry=("grader", "Last Name")
+    )
+
+    row = result.disagreements.iloc[0]
+    assert (row["grader"], row["Last Name"]) == ("SOB", "Barry")
+
+
+def test_a_carried_column_the_received_frame_already_has_is_left_alone():
+    """Merging it would come back as grade_x and grade_y, and the comparison
+    would be reading one of them without saying which."""
+    frame = reported_with_graders(a=62, b=68)
+    frame["grade"] = [1, 2]
+
+    result = reconcile_marks(
+        received(a=62, b=71), frame, carry=("grader", "grade")
+    )
+
+    assert "grade_x" not in result.comparison.columns
+    assert result.comparison["grade"].tolist() == [62, 71]

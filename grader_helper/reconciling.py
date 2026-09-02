@@ -27,9 +27,19 @@ number.
 House convention: ``pl`` is pathlib, ``pr`` is polars.
 """
 
-from typing import NamedTuple
+from typing import NamedTuple, Sequence
 
 import pandas as pd
+
+#: Columns carried out of the collated record into the comparison, where the
+#: file has them.
+#:
+#: The grader is the one that matters. A disagreement names a student and two
+#: numbers, and what the module leader does next is open the workbook of
+#: whoever mistyped it -- so without this they are searching five workbooks
+#: for a student id to find out whose slip it was. The answer was in the
+#: collated file the whole time; the merge was throwing it away.
+CARRY_FROM_REPORTED: tuple[str, ...] = ("grader",)
 
 
 class Reconciliation(NamedTuple):
@@ -105,6 +115,7 @@ def reconcile_marks(
     id_column: str = "Student ID",
     received_column: str = "grade",
     reported_column: str = "Mark",
+    carry: Sequence[str] = CARRY_FROM_REPORTED,
 ) -> Reconciliation:
     """
     Compare what the students were given with what the graders reported.
@@ -119,6 +130,12 @@ def reconcile_marks(
         then matches nothing.
     received_column (str): Where the mark is in ``received``.
     reported_column (str): Where the mark is in ``reported``.
+    carry (Sequence[str]): Extra columns to bring across from ``reported``,
+        so a disagreement says who to go and ask. Defaults to the grader.
+        Any that the collated file has not got are skipped, because a file
+        collated before the allocation wrote that column is still a valid
+        record -- and so are any the received frame already has, which would
+        otherwise come back suffixed _x and _y.
 
     Returns:
     Reconciliation: The full comparison, the disagreements, and the three
@@ -144,9 +161,18 @@ def reconcile_marks(
                 f"{list(frame.columns)}."
             )
 
+    wanted = [id_column, reported_column]
+    wanted += [
+        column
+        for column in carry
+        if column in reported.columns
+        and column not in received.columns
+        and column not in wanted
+    ]
+
     try:
         comparison = received.merge(
-            reported[[id_column, reported_column]],
+            reported[wanted],
             on=id_column,
             how="outer",
             indicator=True,
