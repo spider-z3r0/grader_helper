@@ -741,3 +741,35 @@ def test_a_macro_enabled_sheet_is_found(cw1):
     found = feedback_sheets(cw1)
 
     assert macro in [p for paths in found.values() for p in paths]
+
+
+@pytest.mark.parametrize(
+    "stem",
+    ["Feedback sheet 24439711", "feedback sheet 24439711",
+     "FEEDBACK SHEET 24439711"],
+)
+def test_the_prefix_match_ignores_case(stem):
+    """The constant is lower case and the filename is not, which reads like
+    a bug every time this file is scanned. It is not one -- the stem is
+    lower-cased before the comparison -- and this is what says so."""
+    from grader_helper.simulating import _identifier
+
+    assert _identifier(stem) == "24439711"
+
+
+def test_the_identifier_keeps_its_own_case():
+    from grader_helper.simulating import _identifier
+
+    assert _identifier("Feedback sheet Team 3") == "Team 3"
+
+
+def test_explain_and_write_together_say_nothing_was_written(ready_to_mark, capsys):
+    """Leaving --explain on a --write command was a silent no-op."""
+    from grader_helper.simulating import main
+
+    main([str(ready_to_mark.root), "-a", "cw1", "--explain", "--write"])
+
+    assert "--write is being ignored" in capsys.readouterr().out
+    cw1 = ready_to_mark.assessment("cw1")
+    received = catch_grades(cw1.submissions_path, cw1.grade_cell)
+    assert received.empty or received["grade"].isna().all()

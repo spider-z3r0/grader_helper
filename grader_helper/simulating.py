@@ -65,8 +65,13 @@ from .models import Assessment, Module, load_module
 #: `catch_grades` reads, so what can be written can be read back.
 SHEET_SUFFIXES = (".xlsx", ".xlsm", ".xlsb", ".xls")
 
-#: What `distribute_feedback_sheets` names the sheets it copies in. The
-#: identifier after it is a student id, or a group label like "Team 3".
+#: What `distribute_feedback_sheets` names the sheets it copies in --
+#: "Feedback sheet 24439711.xlsx" -- with the identifier after it a student
+#: id or a group label like "Team 3".
+#:
+#: Lower case because it is compared against a lower-cased stem, so the
+#: match ignores case. Written out here because a lower-case constant beside
+#: a capitalised filename reads like a bug on every scan of this file.
 SHEET_PREFIX = "feedback sheet "
 
 #: The column a grader writes their mark into, matching `allocating` and
@@ -141,9 +146,13 @@ class SimulatedMarking(NamedTuple):
 
 
 def _identifier(stem: str) -> str | None:
-    """The student id or group label a feedback sheet is named for."""
-    lowered = stem.lower()
-    if not lowered.startswith(SHEET_PREFIX):
+    """The student id or group label a feedback sheet is named for.
+
+    Case-insensitive on the prefix and case-preserving on what follows:
+    "Feedback sheet 24439711" and "FEEDBACK SHEET Team 3" both work, and the
+    identifier comes back as it was written.
+    """
+    if not stem.lower().startswith(SHEET_PREFIX):
         return None
     found = stem[len(SHEET_PREFIX):].strip()
     return found or None
@@ -760,6 +769,11 @@ def _run_on_folders(args, parser) -> int:
     )
     print(f"{args.submissions}  (cell {args.cell})")
     if args.explain:
+        if args.write:
+            print(
+                "  --explain writes nothing, and --write is being ignored. "
+                "Run it again without --explain to mark anything."
+            )
         _explain(explain_sheets(args.submissions, args.cell, args.blank))
         return 0
     if args.workbooks is None:
@@ -916,6 +930,11 @@ def main(argv: "Sequence[str] | None" = None) -> int:
     print(f"{module.code} -- {module.name}  ({module.root})")
 
     if args.explain:
+        if args.write:
+            print(
+                "\n  --explain writes nothing, and --write is being ignored. "
+                "Run it again without --explain to mark anything."
+            )
         for assessment in _assessments_to_mark(module, args.assessment):
             print(f"\n  {assessment.id}  (grade cell {assessment.grade_cell})")
             print(f"  submissions: {assessment.submissions_path}")
