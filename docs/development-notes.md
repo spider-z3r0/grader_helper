@@ -2060,9 +2060,10 @@ being on them: a cohort where nobody failed and nobody sat on a boundary is
 a fine result and the step still ran, so counting it as not-done would leave
 a tick missing on a module that is finished.
 
-Still by hand, and worth knowing: the repeat list carries no **email
-address**. `import_brightspace_classlist` selects four columns and drops
-`Email`, which the Brightspace export does carry.
+**No email address, and none needed.** A UL student's address is their
+student number plus a fixed suffix, so the id on the list *is* the address
+and carrying `Email` through would be storing a derivation of a column that
+is already there. `import_brightspace_classlist` drops it, and should.
 
 ### Simulating the marking
 
