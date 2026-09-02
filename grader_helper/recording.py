@@ -40,6 +40,7 @@ from .file_operations.save_distributed_graders import Allocation
 from .file_operations.write_departmental_sheet import DepartmentalWrite
 from .ingesting.ingest_completed_graderfiles import Collation
 from .moderation.pack import Pack
+from .outcomes import Outcomes
 from .si_upload import SiUpload
 
 
@@ -98,6 +99,14 @@ RULES: dict[type, Evidence] = {
     Pack: Evidence(
         flag="moderation_pack_built",
         satisfied=lambda r: r.manifest.is_file(),
+        scope="module",
+    ),
+    # The lists were written if the sheet they came off had students in it.
+    # NOT "somebody has to repeat": a cohort where nobody failed and nobody
+    # sat on a boundary is a fine result, and the step still ran.
+    Outcomes: Evidence(
+        flag="outcomes_written",
+        satisfied=lambda r: r.repeats_path is not None,
         scope="module",
     ),
     # The upload was written if marks went in and SI's roll was fully

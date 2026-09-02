@@ -67,6 +67,7 @@ class ModuleStatus(BaseModel):
     ``departmental_sheet_written``  ``sent_to_department``
     ``moderation_pack_built``       (per assessment: ``moderated``)
     ``si_file_written``             ``si_submitted``
+    ``outcomes_written``            (the contacting is somebody's job)
     ==============================  ============================
 
     The automatic ones are set by :meth:`ModuleFile.record` from what a step
@@ -81,6 +82,8 @@ class ModuleStatus(BaseModel):
     departmental_sheet_written: bool = False
     moderation_pack_built: bool = False
     si_file_written: bool = False
+    #: The repeat and borderline lists were worked out and written down.
+    outcomes_written: bool = False
 
     # --- only a person knows these ---------------------------------------
     #: The sheet reached the department. We wrote a file; we cannot know it

@@ -87,6 +87,15 @@ from .allocating import (
     build_group_membership,
 )
 
+# outcomes -- who in the finished sheet somebody has to do something about
+from .outcomes import (
+    REPEAT_GRADES,
+    Outcomes,
+    students_on_a_boundary,
+    students_to_repeat,
+    write_outcomes,
+)
+
 # the student information system upload
 from .si_upload import (
     SiUpload,
@@ -192,6 +201,11 @@ __all__ = [
     "next_grade_up",
     "read_moderation_manifest",
     "sample_for_moderation",
+    "Outcomes",
+    "write_outcomes",
+    "students_to_repeat",
+    "students_on_a_boundary",
+    "REPEAT_GRADES",
     "SiUpload",
     "read_si_file",
     "student_id_from_key",

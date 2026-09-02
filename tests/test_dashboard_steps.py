@@ -917,3 +917,34 @@ def test_allocation_runs_from_a_groups_file(one_groups_file, dashboard):
 
     assert master.students == len(again["class_list"])
     assert (allocation.groupby("Group")["grader"].nunique() == 1).all()
+
+
+# ---------------------------------------------------------------------------
+# Who to follow up
+# ---------------------------------------------------------------------------
+
+
+def test_the_follow_up_lists_are_written_from_the_buttons(
+    module_on_disk, dashboard
+):
+    """Read off the finished sheet: who repeats, and who is a mark short."""
+    import pandas as pd
+
+    names = dashboard(module_on_disk)
+    sheet = pd.DataFrame(
+        {
+            "Name": ["Failed", "OneOff", "Passed"],
+            "Student ID": ["1", "2", "3"],
+            "Total % Grade": [30.0, 39.0, 62.0],
+            "Letter Grade": ["F", "D1", "B3"],
+        }
+    )
+
+    outcomes = names["write_the_outcomes"](names["found"].module, sheet)
+
+    assert outcomes.repeats["Name"].tolist() == ["Failed"]
+    assert outcomes.borderline["Name"].tolist() == ["OneOff"]
+    assert outcomes.repeats_path.exists()
+    assert ModuleFile.load(module_on_disk).module.status.outcomes_written, (
+        "the flag has to survive a reload of the file"
+    )

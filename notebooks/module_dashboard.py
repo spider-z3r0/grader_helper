@@ -20,6 +20,7 @@ with app.setup():
         sample_for_moderation,
         write_departmental_sheet,
         write_si_marks,
+        write_outcomes,
         allocate_graders,
         attach_group_membership,
         build_group_membership,
@@ -290,6 +291,7 @@ def the_module(found, loaded):
                 ),
                 ("moderation pack", module.status.moderation_pack_built, None),
                 ("SI upload", module.status.si_file_written, module.status.si_submitted),
+                ("follow-up lists", module.status.outcomes_written, None),
             )
         ]
 
@@ -1808,11 +1810,19 @@ def the_module_actions(found):
         found.file.record(upload)
         return upload
 
+    def write_the_outcomes(module, sheet, replace=False):
+        """The two lists read off the finished sheet: who repeats, and who
+        is a mark short of the next band."""
+        outcomes = write_outcomes(module, sheet, overwrite=replace)
+        found.file.record(outcomes)
+        return outcomes
+
     return (
         build_the_pack,
         collate_the_module,
         draw_the_sample,
         fill_si_upload,
+        write_the_outcomes,
         write_the_departmental_sheet,
     )
 
@@ -2138,6 +2148,89 @@ def do_si(si, fill_si_upload, attempt, failed, found, module_sheet):
             )
 
     si_done
+    return
+
+
+@app.cell
+def outcomes_button(loaded, module_sheet):
+    outcomes_go = mo.ui.run_button(
+        label="Write the repeat and borderline lists", kind="warn"
+    )
+
+    (
+        mo.vstack([
+            mo.md(
+                """
+                ### 9. Who to follow up
+
+                Two lists read off the finished sheet, written beside it:
+                **everyone at F or NG**, who has to be contacted about
+                repeating, and **everyone within a mark of the next band**,
+                who is worth a second look before the marks are final.
+
+                Neither is a decision. They are the students a decision is
+                due about, so it gets made from a list rather than from a
+                scroll through the whole cohort.
+                """
+            ),
+            outcomes_go,
+        ])
+        if loaded and module_sheet is not None
+        else mo.md(
+            "### 9. Who to follow up\n\n*Not yet — collate the module first.*"
+        )
+        if loaded
+        else mo.md("")
+    )
+    return (outcomes_go,)
+
+
+@app.cell
+def do_outcomes(
+    outcomes_go, write_the_outcomes, attempt, failed, found, module_sheet,
+    replace,
+):
+    if not (outcomes_go.value and module_sheet is not None):
+        outcomes_note = mo.md("")
+    else:
+        _done, _error = attempt(
+            lambda: write_the_outcomes(found.module, module_sheet, replace.value)
+        )
+        if _error is not None:
+            outcomes_note = failed("Writing the lists", _error)
+        else:
+            outcomes_note = mo.vstack([
+                mo.md(
+                    f"""
+                    ### Who to follow up
+
+                    **{_done}**
+
+                    `{_done.repeats_path.name}` and
+                    `{_done.borderline_path.name}`, beside the module.
+                    """
+                ),
+                mo.md("**To repeat — F or NG**"),
+                mo.ui.table(
+                    _done.repeats[
+                        [c for c in ("Name", "Student ID", "Total % Grade",
+                                     "Letter Grade") if c in _done.repeats.columns]
+                    ],
+                    selection=None,
+                ),
+                mo.md("**Within a mark of the next band**"),
+                mo.ui.table(
+                    _done.borderline[
+                        [c for c in ("Name", "Student ID", "Total % Grade",
+                                     "Letter Grade", "Next Grade",
+                                     "Points To Next")
+                         if c in _done.borderline.columns]
+                    ],
+                    selection=None,
+                ),
+            ])
+
+    outcomes_note
     return
 
 

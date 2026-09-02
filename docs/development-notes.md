@@ -284,7 +284,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 724 tests on Linux and 725 with a real Excel:
+Done, 747 tests on Linux and 748 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -1978,6 +1978,43 @@ instead. Six guards verified by reintroducing the bug: the picked class list
 ignored, the unparseable one unhandled, an absolute path written to
 `module.toml`, a no-op save reported as success, the group join skipped, and
 missing group sheets not blocking allocation.
+
+### Who to follow up
+
+Two lists get read *off* the finished departmental sheet and acted on, and
+both were being worked out by eye over eighty rows.
+
+**Repeats** — everyone at **F or NG**. Both, not just F: NG is no
+participation where F is work that did not pass, and the difference matters
+in the conversation, but the conversation happens either way.
+
+**Borderlines** — everyone within a mark of the next band. One mark because
+the sheet's totals are whole numbers, so "within one" means one more mark
+would have moved them. `flag_borderline` has computed this since the
+moderation sample was built and **nothing outside moderation ever looked at
+it**, which is the whole of the change: the machinery existed and was
+reachable from one place only.
+
+`write_outcomes` writes both beside the module, named for it —
+`PS4034 repeats.csv`, not `repeats.csv`, because these get attached to
+emails and the reader needs to know which module's. Whole rows, not just the
+totals: the per-assessment marks are what say *why* somebody did not pass,
+and a repeat conversation starting from a total alone starts by going back
+to the sheet.
+
+Neither list is a decision. They are the students a decision is due about,
+written down so it is made from a list rather than from a scroll.
+
+Two guards worth naming. Both files are checked before either is written --
+one list current and the other from the last run is worse than neither. And
+`outcomes_written` is satisfied by **the files existing**, not by anyone
+being on them: a cohort where nobody failed and nobody sat on a boundary is
+a fine result and the step still ran, so counting it as not-done would leave
+a tick missing on a module that is finished.
+
+Still by hand, and worth knowing: the repeat list carries no **email
+address**. `import_brightspace_classlist` selects four columns and drops
+`Email`, which the Brightspace export does carry.
 
 ### Simulating the marking
 
