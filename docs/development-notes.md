@@ -284,7 +284,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 747 tests on Linux and 748 with a real Excel:
+Done, 753 tests on Linux and 754 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -632,6 +632,18 @@ assumes the one before it works.
    A **leader-managed** group assessment needs none of this: its download,
    its feedback sheets and its collation are the ordinary individual path,
    which is exactly why the two kinds are separated at the model.
+
+8. **Repeats as an assessment of their own.** When a student repeats a
+   module the whole process happens outside this workflow, and it does not
+   need to: a repeat is a piece of assessment with a cohort, a grader, a
+   feedback sheet and a mark, which is what everything here already handles.
+   Wiring it up looks like existing code rather than new code.
+
+   This is also why there is **no "module completed" lock**. It was asked
+   for and dropped on purpose: a module whose repeats have not been marked
+   is not finished, so a flag saying it is would be wrong for exactly the
+   modules that most need one. Locking is a question to settle *after* this
+   item, not before.
 
 **Polars migration** is unblocked but not scheduled: the Excel round-trip
 tests are the contract a port has to keep, and it can land whenever it stops
@@ -1978,6 +1990,42 @@ instead. Six guards verified by reintroducing the bug: the picked class list
 ignored, the unparseable one unhandled, an absolute path written to
 `module.toml`, a no-op save reported as success, the group join skipped, and
 missing group sheets not blocking allocation.
+
+### Overwriting, offered only when there is something to overwrite
+
+One checkbox served the whole page — *"replace the allocation and grader
+workbooks if they exist"* — and it was wrong in three ways at once. It was
+shown **before anything existed to replace**, which is a question about
+nothing. It stood for **every step**, so agreeing to replace the allocation
+also agreed to replace the collated marks on a click three sections further
+down. And it said nothing about **what** was there.
+
+Now each step asks for itself, and only when it has something to ask about:
+
+```
+### 1. Allocate the marking
+Splits the class list between the graders...
+
+**This step has already written:**
+
+- `distributed.xlsx` — written 02 Sep 2026, 15:04
+- `KOM.xlsx` — written 02 Sep 2026, 15:04
+
+It will refuse rather than replace them, unless you say so here.
+[ ] replace what is there
+```
+
+The **time** is the point. "distributed.xlsx is there" invites a shrug;
+"written 02 Sep at 15:04" is a fact somebody can weigh against what they
+remember doing.
+
+`artefacts_of(step, assessment)` names what a step writes whether or not it
+has run, and `already_there(paths)` describes the ones that exist. Both are
+returned from their cell rather than computed inside a panel, so a test can
+drive them -- the panel itself is the part that cannot be.
+
+Feedback sheets are still not in any of this, and must not be: a sheet in a
+student's folder may carry a mark, and there is no tick that changes that.
 
 ### Who to follow up
 

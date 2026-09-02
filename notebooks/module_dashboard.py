@@ -3,6 +3,7 @@ import marimo
 app = marimo.App(width="medium")
 
 with app.setup():
+    import datetime as dt
     import os
     import pathlib as pl
 
@@ -960,19 +961,81 @@ def the_chosen_assessment(found, loaded, which):
 
 @app.cell
 def step_options(loaded):
-    replace = mo.ui.checkbox(
-        value=False,
-        label="replace the allocation and grader workbooks if they exist "
-        "(never feedback sheets)",
+    # One checkbox per step, not one for the page. A single tick meant that
+    # agreeing to replace the allocation also agreed to replace the collated
+    # marks, on a click three sections further down -- and it was shown
+    # before anything existed to replace, which is a question about nothing.
+    replace_for = mo.ui.dictionary(
+        {
+            key: mo.ui.checkbox(value=False, label="replace what is there")
+            for key in (
+                "allocate", "collect", "departmental", "pack", "si", "outcomes"
+            )
+        }
     )
+    return (replace_for,)
 
-    replace if loaded else mo.md("")
-    return (replace,)
+
+@app.cell
+def what_is_already_there(found, loaded):
+    def artefacts_of(step, assessment=None):
+        """The files a step writes, whether or not they exist yet.
+
+        Named per step so the page can say what is there before offering to
+        replace it -- and so a step that has written nothing shows no
+        question at all.
+        """
+        module = found.module if loaded else None
+        if assessment is not None:
+            if step == "allocate":
+                return [
+                    assessment.folder_path / "distributed.xlsx",
+                    *(
+                        assessment.grading_output_path / f"{g.initials}.xlsx"
+                        for g in assessment.graders
+                    ),
+                ]
+            if step == "collect":
+                return [
+                    assessment.grading_output_path / f"completed_grades.{s}"
+                    for s in ("xlsx", "csv")
+                ]
+            return []
+        if module is None or module.root is None:
+            return []
+        if step == "departmental":
+            return [module.departmental_sheet_path or module.root / "-"]
+        if step == "outcomes":
+            return [
+                module.root / f"{module.code} repeats.csv",
+                module.root / f"{module.code} borderline.csv",
+            ]
+        return []
+
+    def already_there(paths):
+        """The ones that exist, described -- name and when they were written.
+
+        The time is the point: "distributed.xlsx is there" invites a shrug,
+        where "written 2 Sep at 15:04" is a fact somebody can weigh against
+        what they remember doing.
+        """
+        found_paths = []
+        for path in paths:
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            when = dt.datetime.fromtimestamp(stat.st_mtime)
+            found_paths.append(f"`{path.name}` — written {when:%d %b %Y, %H:%M}")
+        return found_paths
+
+    return already_there, artefacts_of
 
 
 @app.cell
 def why_not(
     chosen, collected, class_list, repeats, submissions_state, groups_where,
+    already_there,
 ):
     def blocking(*needs: str) -> list[str]:
         """What is missing before a step can run, in words."""
@@ -1030,13 +1093,41 @@ def why_not(
         }
         return [reasons[need] for need in needs if not have[need]]
 
-    def step_panel(title: str, explanation: str, button, blocked: list[str]):
-        """A step, or the reason it cannot run yet."""
+    def step_panel(
+        title: str,
+        explanation: str,
+        button,
+        blocked: list[str],
+        exists=(),
+        replace=None,
+    ):
+        """A step, the reason it cannot run yet, or what it would replace.
+
+        The tick to overwrite appears **only when there is something to
+        overwrite**, and under a list of what that is. Asked up front it is a
+        question about nothing, and a page full of ticked boxes from an
+        earlier decision is how a step replaces work somebody wanted kept.
+        """
         if blocked:
             return mo.md(
                 f"### {title}\n\n*Not yet — " + "; ".join(blocked) + ".*"
             )
-        return mo.vstack([mo.md(f"### {title}\n\n{explanation}"), button])
+
+        here = already_there(exists)
+        if not here or replace is None:
+            return mo.vstack([mo.md(f"### {title}\n\n{explanation}"), button])
+
+        return mo.vstack([
+            mo.md(
+                f"### {title}\n\n{explanation}\n\n**This step has already "
+                "written:**\n\n"
+                + "\n".join(f"- {item}" for item in here)
+                + "\n\nIt will refuse rather than replace them, unless you "
+                "say so here."
+            ),
+            replace,
+            button,
+        ])
 
     return blocking, step_panel
 
@@ -1421,7 +1512,7 @@ def do_remember_groups(
 
 
 @app.cell
-def allocate_button(blocking, step_panel, chosen):
+def allocate_button(blocking, step_panel, chosen, artefacts_of, replace_for):
     allocate = mo.ui.run_button(label="Allocate the marking", kind="warn")
 
     step_panel(
@@ -1431,6 +1522,8 @@ def allocate_button(blocking, step_panel, chosen):
         "`grading_output/`. The split is random and even.",
         allocate,
         blocking("class list", "graders", "group sheets"),
+        exists=artefacts_of("allocate", chosen),
+        replace=replace_for["allocate"],
     ) if chosen is not None else mo.md("")
     return (allocate,)
 
@@ -1438,13 +1531,15 @@ def allocate_button(blocking, step_panel, chosen):
 @app.cell
 def do_allocate(
     allocate, allocate_marking, attempt, failed, chosen, class_list, recorded,
-    replace,
+    replace_for,
 ):
     if not (allocate.value and chosen is not None):
         allocated = mo.md("")
     else:
         _done, _error = attempt(
-            lambda: allocate_marking(chosen, class_list, replace.value)
+            lambda: allocate_marking(
+                chosen, class_list, replace_for["allocate"].value
+            )
         )
         if _error is not None:
             allocated = failed("Allocation", _error)
@@ -1610,7 +1705,7 @@ def do_distribute(
 
 
 @app.cell
-def collect_button(blocking, step_panel, chosen):
+def collect_button(blocking, step_panel, chosen, artefacts_of, replace_for):
     collect = mo.ui.run_button(label="Collect and reconcile the marks", kind="warn")
 
     step_panel(
@@ -1626,11 +1721,15 @@ def collect_button(blocking, step_panel, chosen):
 
 
 @app.cell
-def do_collect(collect, collect_marks, attempt, failed, chosen, recorded, replace):
+def do_collect(
+    collect, collect_marks, attempt, failed, chosen, recorded, replace_for,
+):
     if not (collect.value and chosen is not None):
         collected_marks = mo.md("")
     else:
-        _done, _error = attempt(lambda: collect_marks(chosen, replace.value))
+        _done, _error = attempt(
+            lambda: collect_marks(chosen, replace_for["collect"].value)
+        )
         if _error is not None:
             collected_marks = failed("Collecting the marks", _error)
         else:
@@ -1951,7 +2050,7 @@ def departmental_button(loaded, found, module_sheet):
 @app.cell
 def do_departmental(
     dept_sheet, write_the_departmental_sheet, attempt, failed, found, module_sheet,
-    replace,
+    replace_for,
 ):
     if not (dept_sheet.value and module_sheet is not None):
         departmental_done = mo.md("")
@@ -1963,7 +2062,8 @@ def do_departmental(
         )
         _done, _error = attempt(
             lambda: write_the_departmental_sheet(
-                _module, module_sheet, _destination, replace.value
+                _module, module_sheet, _destination,
+                replace_for["departmental"].value,
             )
         )
         if _error is not None:
@@ -2023,7 +2123,7 @@ def moderation_panel(loaded, module_sheet, per_band, borderline_mode, moderate):
 @app.cell
 def do_moderation(
     moderate, draw_the_sample, build_the_pack, attempt, failed, found, module_sheet,
-    per_band, borderline_mode, replace,
+    per_band, borderline_mode, replace_for,
 ):
     if not (moderate.value and module_sheet is not None):
         moderation_done = mo.md("")
@@ -2036,7 +2136,7 @@ def do_moderation(
                 found.module,
                 sample,
                 found.module.root / "Moderation",
-                replace.value,
+                replace_for["pack"].value,
             )
             return sample, pack
 
@@ -2152,7 +2252,7 @@ def do_si(si, fill_si_upload, attempt, failed, found, module_sheet):
 
 
 @app.cell
-def outcomes_button(loaded, module_sheet):
+def outcomes_button(loaded, module_sheet, artefacts_of, already_there, replace_for):
     outcomes_go = mo.ui.run_button(
         label="Write the repeat and borderline lists", kind="warn"
     )
@@ -2173,6 +2273,22 @@ def outcomes_button(loaded, module_sheet):
                 scroll through the whole cohort.
                 """
             ),
+            *(
+                [
+                    mo.md(
+                        "**This step has already written:**\n\n"
+                        + "\n".join(
+                            f"- {item}"
+                            for item in already_there(artefacts_of("outcomes"))
+                        )
+                        + "\n\nIt will refuse rather than replace them, "
+                        "unless you say so here."
+                    ),
+                    replace_for["outcomes"],
+                ]
+                if already_there(artefacts_of("outcomes"))
+                else []
+            ),
             outcomes_go,
         ])
         if loaded and module_sheet is not None
@@ -2188,13 +2304,15 @@ def outcomes_button(loaded, module_sheet):
 @app.cell
 def do_outcomes(
     outcomes_go, write_the_outcomes, attempt, failed, found, module_sheet,
-    replace,
+    replace_for,
 ):
     if not (outcomes_go.value and module_sheet is not None):
         outcomes_note = mo.md("")
     else:
         _done, _error = attempt(
-            lambda: write_the_outcomes(found.module, module_sheet, replace.value)
+            lambda: write_the_outcomes(
+                found.module, module_sheet, replace_for["outcomes"].value
+            )
         )
         if _error is not None:
             outcomes_note = failed("Writing the lists", _error)

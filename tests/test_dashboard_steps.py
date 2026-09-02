@@ -948,3 +948,91 @@ def test_the_follow_up_lists_are_written_from_the_buttons(
     assert ModuleFile.load(module_on_disk).module.status.outcomes_written, (
         "the flag has to survive a reload of the file"
     )
+
+
+# ---------------------------------------------------------------------------
+# Overwriting, offered only when there is something to overwrite
+# ---------------------------------------------------------------------------
+#
+# One checkbox served the whole page: shown before anything existed to
+# replace, which is a question about nothing, and left ticked it agreed to
+# replace the collated marks on a click three sections further down.
+
+
+def test_nothing_is_offered_for_replacement_before_anything_exists(
+    module_on_disk, dashboard
+):
+    names = dashboard(module_on_disk)
+    cw1 = names["found"].module.assessment("cw1")
+
+    assert names["already_there"](names["artefacts_of"]("allocate", cw1)) == []
+
+
+def test_what_a_step_wrote_is_named_back_with_its_time(module_on_disk, dashboard):
+    """"distributed.xlsx is there" invites a shrug; "written 2 Sep at 15:04"
+    is a fact somebody can weigh against what they remember doing."""
+    names = dashboard(module_on_disk)
+    cw1 = names["found"].module.assessment("cw1")
+    names["allocate_marking"](cw1, names["class_list"])
+
+    again = dashboard(module_on_disk)
+    here = again["already_there"](again["artefacts_of"]("allocate", cw1))
+
+    assert here, "the allocation it just wrote is not being reported"
+    assert any("distributed.xlsx" in item for item in here)
+    assert all("written" in item for item in here)
+
+
+def test_each_step_answers_for_its_own_files(module_on_disk, dashboard):
+    """The allocation existing must not offer to replace the collated marks:
+    one tick standing for every step is how work somebody wanted kept gets
+    replaced by a click somewhere else."""
+    names = dashboard(module_on_disk)
+    cw1 = names["found"].module.assessment("cw1")
+    names["allocate_marking"](cw1, names["class_list"])
+
+    again = dashboard(module_on_disk)
+    cw1 = again["found"].module.assessment("cw1")
+
+    assert again["already_there"](again["artefacts_of"]("allocate", cw1))
+    assert again["already_there"](again["artefacts_of"]("collect", cw1)) == []
+
+
+def test_every_step_has_its_own_tick(module_on_disk, dashboard):
+    names = dashboard(module_on_disk)
+
+    assert set(names["replace_for"]) == {
+        "allocate", "collect", "departmental", "pack", "si", "outcomes"
+    }
+    assert not any(box.value for box in names["replace_for"].values()), (
+        "a tick that starts on is a decision nobody made"
+    )
+
+
+def test_the_module_level_lists_answer_for_themselves(module_on_disk, dashboard):
+    import pandas as pd
+
+    names = dashboard(module_on_disk)
+    assert names["already_there"](names["artefacts_of"]("outcomes")) == []
+
+    names["write_the_outcomes"](
+        names["found"].module,
+        pd.DataFrame(
+            {
+                "Name": ["A"], "Student ID": ["1"],
+                "Total % Grade": [30.0], "Letter Grade": ["F"],
+            }
+        ),
+    )
+
+    again = dashboard(module_on_disk)
+    assert len(again["already_there"](again["artefacts_of"]("outcomes"))) == 2
+
+
+def test_an_assessment_with_no_files_yet_is_not_an_error(module_on_disk, dashboard):
+    """artefacts_of names what a step writes whether or not it has run."""
+    names = dashboard(module_on_disk)
+    cw2 = names["found"].module.assessment("cw2")
+
+    assert names["artefacts_of"]("allocate", cw2)
+    assert names["already_there"](names["artefacts_of"]("allocate", cw2)) == []
