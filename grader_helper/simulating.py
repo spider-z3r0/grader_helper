@@ -769,11 +769,6 @@ def _run_on_folders(args, parser) -> int:
     )
     print(f"{args.submissions}  (cell {args.cell})")
     if args.explain:
-        if args.write:
-            print(
-                "  --explain writes nothing, and --write is being ignored. "
-                "Run it again without --explain to mark anything."
-            )
         _explain(explain_sheets(args.submissions, args.cell, args.blank))
         return 0
     if args.workbooks is None:
@@ -916,6 +911,16 @@ def main(argv: "Sequence[str] | None" = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    if args.explain and args.write:
+        # A warning at the top of a long report is missable, and the report
+        # itself looks like a successful run. Nothing legitimate wants both.
+        parser.error(
+            "--explain and --write do opposite things: --explain looks and "
+            "writes nothing, --write marks the sheets. Pick one. Run "
+            "--explain first to see what would happen, then the same command "
+            "without it."
+        )
+
     if (args.module is None) == (args.submissions is None):
         parser.error(
             "Give either a module folder or --submissions, not both and not "
@@ -930,11 +935,6 @@ def main(argv: "Sequence[str] | None" = None) -> int:
     print(f"{module.code} -- {module.name}  ({module.root})")
 
     if args.explain:
-        if args.write:
-            print(
-                "\n  --explain writes nothing, and --write is being ignored. "
-                "Run it again without --explain to mark anything."
-            )
         for assessment in _assessments_to_mark(module, args.assessment):
             print(f"\n  {assessment.id}  (grade cell {assessment.grade_cell})")
             print(f"  submissions: {assessment.submissions_path}")

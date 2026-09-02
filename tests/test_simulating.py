@@ -763,13 +763,15 @@ def test_the_identifier_keeps_its_own_case():
     assert _identifier("Feedback sheet Team 3") == "Team 3"
 
 
-def test_explain_and_write_together_say_nothing_was_written(ready_to_mark, capsys):
-    """Leaving --explain on a --write command was a silent no-op."""
+def test_explain_and_write_together_are_refused(ready_to_mark):
+    """Leaving --explain on a --write command was a silent no-op that
+    printed a report looking exactly like a successful run. That is the one
+    way to conclude the writer is broken when it has not run at all."""
     from grader_helper.simulating import main
 
-    main([str(ready_to_mark.root), "-a", "cw1", "--explain", "--write"])
+    with pytest.raises(SystemExit):
+        main([str(ready_to_mark.root), "-a", "cw1", "--explain", "--write"])
 
-    assert "--write is being ignored" in capsys.readouterr().out
     cw1 = ready_to_mark.assessment("cw1")
     received = catch_grades(cw1.submissions_path, cw1.grade_cell)
     assert received.empty or received["grade"].isna().all()

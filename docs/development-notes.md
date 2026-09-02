@@ -284,7 +284,7 @@ paths differ per machine.
 
 ## Where the work stands
 
-Done, 714 tests on Linux and 715 with a real Excel:
+Done, 719 tests on Linux and 720 with a real Excel:
 
 - Platform handling corrected — COM init is the only OS conditional; xlwings
   works on macOS too, so it must not be gated on Windows
@@ -2032,6 +2032,20 @@ house note about.
 
 #### `--explain`, because guessing was not working
 
+Four rounds went on why a real module's sheets were not being marked, and
+the answer in the end was that **the writer had never run**: `--explain` was
+on the same command line as `--write`, returned before writing anything, and
+printed a report that looked exactly like a successful run. The two are
+refused together now -- a warning at the top of a long report is missable,
+and there is nothing legitimate that wants both.
+
+Worth keeping in view: of the guesses made along the way, the ones about the
+*code* were checked and mostly wrong, and the one thing never asked for was
+the output of the failing command. Diagnosis over a wire is not the same
+activity as debugging, and the difference is which questions get asked.
+
+
+
 Four separate guesses about why a real module's sheets were not being
 marked all turned out to be about **what was in the grade cell** -- which
 nobody can see from here and everybody can see from there. So:
@@ -2041,7 +2055,8 @@ uv run simulate-marking <module> -a cw1 --explain
 ```
 
 lists every sheet it finds, what its grade cell holds, what the blank rubric
-holds, and whether it would write or skip and why. It writes nothing, and it
+holds, and whether it would write or skip and why. It writes nothing -- and
+refuses to be combined with `--write` for that reason -- and it
 reports an empty folder rather than refusing to run -- refusing is the
 opposite of a diagnostic's job.
 
