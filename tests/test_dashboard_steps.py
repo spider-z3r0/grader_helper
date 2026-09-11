@@ -26,7 +26,7 @@ import sys
 import pandas as pd
 import pytest
 
-pytest.importorskip("marimo", reason="marimo is a dev dependency")
+pytest.importorskip("marimo", reason="marimo is a runtime dependency; missing means the install is broken")
 from openpyxl import load_workbook  # noqa: E402
 
 from grader_helper import extract_studentid_grade  # noqa: E402

@@ -21,7 +21,7 @@ import sys
 
 import pytest
 
-pytest.importorskip("marimo", reason="marimo is a dev dependency")
+pytest.importorskip("marimo", reason="marimo is a runtime dependency; missing means the install is broken")
 
 
 @pytest.fixture

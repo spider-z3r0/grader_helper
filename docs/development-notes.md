@@ -614,6 +614,19 @@ assumes the one before it works.
    for Kev first and hardened for a colleague second — and multi-module
    discovery has since been answered: one folder at a time, chosen in the
    browser, no stored list. See **Pointing at a folder**.
+
+   ~~**Getting it onto a colleague's machine**~~ — done, as of hardening
+   for the pilot. `notebooks/module_dashboard.py` is force-included into the
+   wheel as `grader_helper/_dashboard_app.py` (`pyproject.toml`), and
+   `grader_helper/dashboard_launcher.py` runs marimo against the packaged
+   copy. `marimo` moved from the dev group to `[project.dependencies]` for
+   this — `grader-dashboard` has to work for someone who never ran `uv sync
+   --group dev`. `tests/test_dashboard_packaging.py` builds a real wheel and
+   checks the notebook is actually inside it, because a dev checkout has
+   `notebooks/module_dashboard.py` on disk regardless of whether the
+   force-include is spelled right. A pilot tester's route is now `uv tool
+   install grader-helper` then `grader-dashboard` — no git, no clone. See
+   `docs/running-locally.md`'s **Installing the dashboard**.
 7. **Marks back off a Brightspace-managed group assessment** — the one
    place a group assessment is not yet joined up end to end, and independent
    of 6. Allocation, distribution and marking all work; what is missing is

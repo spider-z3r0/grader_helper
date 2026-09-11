@@ -1,8 +1,79 @@
 # Running this version locally (Windows)
 
-For testing the `develop` branch on your own machine. PowerShell throughout;
-`uv` does the Python and dependency work, so you never activate a venv by
-hand.
+Two audiences, two routes. If you are **piloting the dashboard** — you were
+sent a link, you are not changing any code — use **Installing the dashboard**
+below and stop there. If you are **testing unreleased work on `develop`**,
+skip to **Testing `develop`**, further down.
+
+PowerShell throughout; `uv` does the Python and dependency work, so you never
+activate a venv by hand.
+
+## Installing the dashboard
+
+This installs the released package from PyPI — no git, no clone, no repo on
+your machine.
+
+### 1. Install `uv`, if you don't have it
+
+```powershell
+uv --version
+```
+
+If that fails:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+Close and reopen PowerShell afterwards so `uv` is on `PATH`. You do **not**
+need to install Python yourself — `uv` fetches 3.13 the first time it needs
+it.
+
+### 2. Install grader-helper
+
+```powershell
+uv tool install grader-helper
+```
+
+This puts `grader-dashboard` and `simulate-marking` on your `PATH`, in their
+own isolated environment — it does not touch any other Python you have.
+
+### 3. Run the dashboard
+
+```powershell
+grader-dashboard
+```
+
+This opens marimo in your browser, running the module dashboard. From there:
+point it at a module folder (`docs/dashboard-scope.md` describes what the
+dashboard does; the walkthrough in **Testing `develop`**, step 6 onward,
+covers the same page from the developer side if you want more detail than
+you need as a pilot tester).
+
+### Getting a new version later
+
+```powershell
+uv tool upgrade grader-helper
+```
+
+### Troubleshooting
+
+**`uv : The term 'uv' is not recognized`** — reopen PowerShell after
+installing it; the installer edits `PATH` and the current session will not
+have picked it up.
+
+**`grader-dashboard` opens nothing / browser doesn't launch** — marimo
+prints a URL (`http://localhost:...`) in the terminal it was run from; open
+that manually.
+
+**Anything else** — see the general **Troubleshooting** section near the
+bottom of this file; most of it applies regardless of which route you used
+to get grader_helper installed.
+
+## Testing `develop`
+
+For testing the `develop` branch on your own machine, i.e. work that has not
+been released yet. This clones the repo rather than installing from PyPI.
 
 Verified against Python 3.13 and the CI setup in `.github/workflows/test.yml`.
 
@@ -77,8 +148,10 @@ running.
 uv run pytest -q
 ```
 
-Expect **276 passed, 1 xfailed**. The xfail is `make_sub_date` on `"0000 AM"`
-and is deliberate.
+Expect **753 passed, 1 skipped, 1 xfailed** (the count grows as the suite
+does — see "Where the work stands" in `docs/development-notes.md` for the
+current figure if this one looks off). The xfail is `make_sub_date` on
+`"0000 AM"` and is deliberate.
 
 To match CI exactly (it deselects tests needing a real Excel install):
 

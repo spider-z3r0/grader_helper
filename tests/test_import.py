@@ -14,7 +14,11 @@ import pytest
 # environment has them installed even though an end user's
 # `pip install grader-helper` does not -- which is how an accidental import
 # of one goes unnoticed until release.
-DEV_ONLY_PACKAGES = {"matplotlib", "marimo", "jupyter", "faker", "pytest"}
+#
+# marimo is NOT here: it is a runtime dependency (grader_helper/
+# dashboard_launcher.py needs it present for `grader-dashboard` to work for
+# someone who only ran `uv tool install grader-helper`, with no dev group).
+DEV_ONLY_PACKAGES = {"matplotlib", "jupyter", "faker", "pytest"}
 
 
 def _run(code: str) -> subprocess.CompletedProcess:

@@ -29,7 +29,7 @@ from dataclasses import dataclass
 
 import pytest
 
-pytest.importorskip("marimo", reason="marimo is a dev dependency")
+pytest.importorskip("marimo", reason="marimo is a runtime dependency; missing means the install is broken")
 
 from grader_helper.models import (  # noqa: E402 -- after the skip
     MODULE_FILENAME,

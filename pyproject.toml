@@ -1,6 +1,6 @@
 [project]
 name = "grader-helper"
-version = "0.1.15"
+version = "0.2.0"
 description = "Functions to help manage assignments from UL which are hosted on Brightspace"
 description-content-type = "text/markdown"
 authors = [{name = "Kevin O Malley", email = "kev.c.omalley@pm.me"}]
@@ -17,6 +17,10 @@ dependencies = [
     "polars>=1.0",
     "python-calamine>=0.4.0",
     "tqdm>=4.67.1",
+    # Runs the module dashboard. Promoted out of the dev group so that
+    # `grader-dashboard` (below) works for someone who only ever ran
+    # `uv tool install grader-helper` -- they have no dev group to draw on.
+    "marimo>=0.14.17",
     # xlwings drives Excel on both supported platforms -- COM on Windows,
     # AppleScript on macOS -- so it must NOT be gated on Windows alone.
     "xlwings>=0.33.5; platform_system == 'Windows' or platform_system == 'Darwin'",
@@ -40,6 +44,7 @@ requires-python = ">=3.13"
 # [project.scripts] and break the build.
 [project.scripts]
 simulate-marking = "grader_helper.simulating:main"
+grader-dashboard = "grader_helper.dashboard_launcher:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -48,7 +53,6 @@ build-backend = "hatchling.build"
 [dependency-groups]
 dev = [
     "jupyter>=1.1.1",
-    "marimo>=0.14.17",
     "matplotlib>=3.9,<3.10",
     "faker>=38.2.0",
     "pytest>=8.4.1",
@@ -58,6 +62,15 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["grader_helper"]
+
+# The notebook stays at notebooks/module_dashboard.py -- that path is what
+# the tests and docs/running-locally.md's `marimo edit` walkthrough use --
+# but `grader-dashboard` (see dashboard_launcher.py) needs a copy inside the
+# installed package to find it from a `uv tool install`, which only ships
+# what [tool.hatch.build.targets.wheel] packages. force-include copies it in
+# at build time without moving the source of truth.
+[tool.hatch.build.targets.wheel.force-include]
+"notebooks/module_dashboard.py" = "grader_helper/_dashboard_app.py"
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

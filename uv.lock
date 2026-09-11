@@ -481,9 +481,10 @@ wheels = [
 
 [[package]]
 name = "grader-helper"
-version = "0.1.15"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
+    { name = "marimo" },
     { name = "numpy" },
     { name = "openpyxl" },
     { name = "pandas" },
@@ -500,7 +501,6 @@ dependencies = [
 dev = [
     { name = "faker" },
     { name = "jupyter" },
-    { name = "marimo" },
     { name = "matplotlib" },
     { name = "packaging" },
     { name = "pytest" },
@@ -508,6 +508,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "marimo", specifier = ">=0.14.17" },
     { name = "numpy", specifier = ">=2.2.1" },
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "pandas", specifier = ">=2.2.3" },
@@ -524,7 +525,6 @@ requires-dist = [
 dev = [
     { name = "faker", specifier = ">=38.2.0" },
     { name = "jupyter", specifier = ">=1.1.1" },
-    { name = "marimo", specifier = ">=0.14.17" },
     { name = "matplotlib", specifier = ">=3.9,<3.10" },
     { name = "packaging", specifier = ">=24.0" },
     { name = "pytest", specifier = ">=8.4.1" },
